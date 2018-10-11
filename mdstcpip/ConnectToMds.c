@@ -1,21 +1,51 @@
-#include <config.h>
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+#include <mdsplus/mdsconfig.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <status.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
-#ifndef _WIN32
-#include <pwd.h>
+#ifdef _WIN32
+ #include <winsock2.h>
+#else
+ #include <pwd.h>
+ #define INVALID_SOCKET -1
 #endif
 
+#define LOAD_GETUSERNAME
+#include <pthread_port.h>
 #include "mdsip_connections.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //  Parse Host  ////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-static void ParseHost(char *hostin, char **protocol, char **host)
+static void parseHost(char *hostin, char **protocol, char **host)
 {
   size_t i;
   *protocol = strcpy((char *)malloc(strlen(hostin) + 10), "");
@@ -45,82 +75,50 @@ static void ParseHost(char *hostin, char **protocol, char **host)
 /// Execute login inside server using given connection
 ///
 /// \param id of connection (on client) to be used
-/// \return status o login into server 1 if success, -1 if not authorized or error
+/// \return status o login into server 1 if success, MDSplusERROR if not authorized or error
 /// occurred
 ///
-static int DoLogin(int id)
+static int doLogin(Connection* c)
 {
-  int status;
+  INIT_STATUS;
   Message *m;
-  char *user_p;
-#ifdef _WIN32
-  char user[128];
-  DWORD bsize = 128;
-#ifdef _NI_RT_
-  user_p = "Windows User";
-#else
-  user_p = GetUserName(user, &bsize) ? user : "Windows User";
-#endif
-#elif __MWERKS__
-  user_p = "Macintosh User";
-#else
-#define BUFSIZE 256
-  char buf[BUFSIZE];
-  struct passwd pwd = {0};
-  struct passwd *pwd_p = &pwd;
-  getpwuid_r(geteuid(),&pwd,buf,BUFSIZE,&pwd_p);
-  if (!pwd_p) {
-#ifdef __APPLE__
-    user_p = "Apple User";
-#else
-    /*
-     *  On some RHEL6/64 systems 32 bit
-     *  calls to getpwuid return 0
-     *  temporary fix to call getlogin()
-     *  in that case.
-     */
-    getlogin_r(buf,BUFSIZE);
-    if (strlen(buf)>0)
-      user_p = buf;
-    else
-      user_p = "Linux User";
-#endif
-  } else
-    user_p = pwd_p->pw_name;
-#endif
+  static char *user_p;
+  GETUSERNAME(user_p);
   unsigned int length = strlen(user_p);
   m = calloc(1, sizeof(MsgHdr) + length);
   m->h.client_type = SENDCAPABILITIES;
   m->h.length = (short)length;
   m->h.msglen = sizeof(MsgHdr) + length;
   m->h.dtype = DTYPE_CSTRING;
-  m->h.status = GetConnectionCompression(id);
+  m->h.status = c->compression_level;
   m->h.ndims = 0;
   memcpy(m->bytes, user_p, length);
-  status = SendMdsMsg(id, m, 0);
+  status = SendMdsMsgC(c, m, 0);
   free(m);
-  if (status & 1) {
-    m = GetMdsMsg(id, &status);
-    if (m == 0 || !(status & 1)) {
+  if STATUS_OK {
+    m = GetMdsMsgTOC(c, &status, 10000);
+    if (m == 0 || STATUS_NOT_OK) {
       printf("Error in connect\n");
-      return -1;
+      return MDSplusERROR;
     } else {
-      if (!(m->h.status & 1)) {
+      if IS_NOT_OK(m->h.status) {
 	printf("Error in connect: Access denied\n");
 	free(m);
-	return -1;
+	return MDSplusERROR;
       }
       // SET CLIENT COMPRESSION FROM SERVER //
-      SetConnectionCompression(id, (m->h.status & 0x1e) >> 1);
+      c->compression_level= (m->h.status & 0x1e) >> 1;
     }
     if (m)
       free(m);
   } else {
-    perror("Error connecting to server");
-    return -1;
+    fprintf(stderr,"Error connecting to server (DoLogin)\n");
+    fflush(stderr);
+    return MDSplusERROR;
   }
   return status;
 }
+
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -132,31 +130,26 @@ static int DoLogin(int id)
 ///
 int ReuseCheck(char *hostin, char *unique, size_t buflen)
 {
-  int status;
+  int ok = -1;
   char *host = 0;
   char *protocol = 0;
-  IoRoutines *io;
-  ParseHost(hostin, &protocol, &host);
-  io = LoadIo(protocol);
+  parseHost(hostin, &protocol, &host);
+  IoRoutines* io = LoadIo(protocol);
   if (io) {
     if (io->reuseCheck)
-      status = io->reuseCheck(host, unique, buflen);
+      ok = io->reuseCheck(host, unique, buflen);
     else {
       strncpy(unique, hostin, buflen);
-      status = 0;
+      ok = 0;
     }
-  } else {
+  } else
     memset(unique, 0, buflen);
-    status = -1;
-  }
   if (protocol)
     free(protocol);
   if (host)
     free(host);
-  return status;
+  return ok;
 }
-
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -170,20 +163,16 @@ int ConnectToMds(char *hostin)
   char *host = 0;
   char *protocol = 0;
   if (hostin == 0)
-    return -1;
-  ParseHost(hostin, &protocol, &host);
-  id = NewConnection(protocol);
-  if (id != -1) {
-    IoRoutines *io;
-    io = GetConnectionIo(id);
-    if (io && io->connect) {
-      SetConnectionCompression(id, GetCompressionLevel());
-      if (io->connect(id, protocol, host) == -1) {
-	DisconnectConnection(id);
-	id = -1;
-      } else if (DoLogin(id) == -1) {
-	DisconnectConnection(id);
-	id = -1;
+    return id;
+  parseHost(hostin, &protocol, &host);
+  Connection* c = NewConnectionC(protocol);
+  if (c) {
+    if (c->io && c->io->connect) {
+      c->compression_level = GetCompressionLevel();
+      if (c->io->connect(c, protocol, host)<0 || IS_NOT_OK(doLogin(c))) {
+        DisconnectConnectionC(c);
+      } else {
+        id = AddConnection(c);
       }
     }
   }

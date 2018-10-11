@@ -5,9 +5,10 @@
   #define YYLTYPE void *
   #define yylex dcl_lex
   #include "dcl_p.h"
-  #include <dcl.h>
   #include <mdsdcl_messages.h>
+  #include <mdsplus/mdsconfig.h>
   #include "dcllex.h"
+  #include "mdsdclthreadsafe.h"
   static void yyerror(YYLTYPE *yyloc_param, yyscan_t yyscanner, dclCommandPtr *dclcmd, char **error, char *s);
 %}
 %define api.pure full
@@ -26,7 +27,7 @@
 %token QUALIFIER
 %token EQUALS
 %token VALUE
-%token PVALUE
+%token PVALUE_
 %token COMMA
 %token END
 %token COMMENT
@@ -36,7 +37,7 @@
 %type <value_list> pvalue_list
 %type <qualifier> qualifier
 %type <str> QUALIFIER VERB VALUE CMDFILE
-%type <pvalue> PVALUE
+%type <pvalue> PVALUE_
 
 %start command
 
@@ -134,8 +135,8 @@ VALUE {
 }
 
 pvalue_list:
-PVALUE {
-  dclValuePtr dclvalue=$PVALUE;
+PVALUE_ {
+  dclValuePtr dclvalue=$PVALUE_;
   char *value=dclvalue->value;
   $$=malloc(sizeof(dclValueList));
   $$->restOfLine=dclvalue->restOfLine;
@@ -148,17 +149,16 @@ PVALUE {
     dq=nval=strdup(value+1);
     free(value);
     while((dq=strstr(dq,"\"\""))) {
-      dq[1]='\0';
-      dq=dq+1;
-      strcat(nval,dq+1);      
+      memmove(dq, dq+1, strlen(dq+1)+1);
+      dq++;
     }
     value=nval;
   }
   free(dclvalue);
   $$->values[0]=value;
 }
-| pvalue_list COMMA PVALUE {
-  dclValuePtr dclvalue=$PVALUE;
+| pvalue_list COMMA PVALUE_ {
+  dclValuePtr dclvalue=$PVALUE_;
   free(dclvalue->restOfLine);
   $$->values=realloc($$->values,sizeof(char *)*($$->count+1));
   $$->values[$$->count]=dclvalue->value;

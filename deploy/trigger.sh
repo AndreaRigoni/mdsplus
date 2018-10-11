@@ -14,12 +14,11 @@ NAME
                  build jobs used to test pull requests and generate new MDSplus releases.
 
 SYNOPSIS
-    ./trigger.sh [--test[=skip]] [--testrelease] [--valgrind=skip] [--sanitize=skip] [--test_format=tap|log] 
-                 [--release] [--releasedir=directory] 
+    ./trigger.sh [--test[=skip]] [--test_timeunit=factor] [--testrelease] [--valgrind=skip] [--sanitize=skip] [--test_format=tap|log]
+                 [--release] [--releasedir=directory]
                  [--publish] [--publishdir=directory]
                  [--keys=dir] [--dockerpull] [--color]
-                 [--pypi]
-                 
+                 [--pypi] [--make_jars ] [--make_epydocs ]
 
 DESCRIPTION
     The trigger.sh script is used in conjunction with platform build jobs
@@ -38,6 +37,19 @@ DESCRIPTION
 
 OPTIONS
 
+   --make_jars=fc25
+       Build the java jars file in a build_jars subdirectory of the specified os.
+       This will make the directory if necessary, cd to that directory and run
+       configure --enable-java_only and build the java jars in that directory
+       tree. This is used to build the jar files once and then trigger the
+       platform builds with a --jars option so platform builds
+       can just cp the jar files from the trigger directory location.
+
+   --make_epydocs
+       Build the python docs using epydoc. This will replace the mdsobjects/python/doc
+       directory in the trigger sources with updated epydoc documentation. This requires
+       epydoc to be installed and usable on the system running the trigger script.
+
    --test[=skip]
        Build and test the mdsplus sources. The type of tests attempted
        can be controlled by the --valgrind and --sanitize options. Some
@@ -45,14 +57,23 @@ OPTIONS
        contain a --test=skip which supercedes a --test option on the
        command line.
 
+    --test_timeunit=factor
+       Multiply timeout limits by factor to extend or shorten timeout limits
+
     --testrelease
        Use for pull request tests so kits will be built and checked but
        release tags won't be used to compute release number.
+
+    --valgrind
+       Enable valgrind testing for this build
 
     --valgrind=test-list|skip
        Normally the build jobs will perform valgrind tests when testing
        using the test suite that the platform supports. If this is set
        to skip then no valgrind tests will be performed by the build jobs.
+
+    --sanitize
+       Enable sanitize testing for this build
 
     --sanitize=test-list|skip
        Similar to the --valgrind=skip option this can be used to prevent
@@ -89,8 +110,8 @@ OPTIONS
 
     --publish
        This will tag the commit used for the release build with the
-       version and adds a --publish=version option to trigger.opts to 
-       instruct the build jobs to publish the released version. 
+       version and adds a --publish=version option to trigger.opts to
+       instruct the build jobs to publish the released version.
        Both the --releasedir and --publishdir options must be provided
        when triggering a publish operation.
 
@@ -118,6 +139,9 @@ OPTIONS
 
 EOF
 }
+
+SRCDIR=$(realpath $(dirname ${0})/..)
+
 opts=""
 parsecmd() {
     for i in $1
@@ -127,6 +151,13 @@ parsecmd() {
 		printhelp
 		exit
 		;;
+	    --make_jars=*)
+		MAKE_JARS=${i#*=}
+		opts="${opts} --jars"
+		;;
+	    --make_epydocs)
+		MAKE_EPYDOCS=yes
+		;;
 	    --test)
 		opts="${opts} ${i}"
                 ;;
@@ -135,6 +166,9 @@ parsecmd() {
 		;;
 	    --test=skip)
 		opts="${opts} ${i}"
+		;;
+	    --test_timeunit=*)
+		opts="${opts} --test_timeunit=${i#*=}"
 		;;
 	    --test_format=*)
 		opts="${opts} ${i}"
@@ -148,7 +182,13 @@ parsecmd() {
 	    --publish)
 		PUBLISH=yes
 		;;
+	    --valgrind)
+		opts="${opts} ${i}"
+		;;
 	    --valgrind=*)
+		opts="${opts} ${i}"
+		;;
+	    --sanitize)
 		opts="${opts} ${i}"
 		;;
 	    --sanitize=*)
@@ -173,6 +213,9 @@ parsecmd() {
 		;;
 	    --pypi)
 		PUSH_TO_PYPI=yes
+		;;
+	    --promote_to=*)
+		PROMOTE_TO=${i#*=}
 		;;
 	    *)
 		unknownopts="${unknownopts} $i"
@@ -214,7 +257,41 @@ NORMAL() {
     fi
 }
 
-SRCDIR=$(realpath $(dirname ${0})/..)
+if [ ! -z "${MAKE_JARS}" ]
+then
+    if ( ! ${SRCDIR}/deploy/build.sh --make-jars --os=${MAKE_JARS} --workspace=${SRCDIR} > make_jars.log 2>&1 )
+    then
+	RED $COLOR
+	cat <<EOF >&2
+===============================================
+
+Error creating java jar files. Trigger failed. 
+Look at make_jars.log artifact for more info .
+
+===============================================
+EOF
+	NORMAL $COLOR
+	exit 1
+    fi
+fi
+
+if [ ! -z "${MAKE_EPYDOCS}" ]
+then
+    if ( ! ${SRCDIR}/mdsobjects/python/makedoc.sh ${SRCDIR}/mdsobjects/python/doc > make_epydocs.log 2>&1 )
+    then
+	RED $COLOR
+	cat <<EOF >&2
+===============================================
+
+Error creating python documentation. Trigger failed. 
+Look at make_epydocs.log artifact for more info .
+
+===============================================
+EOF
+	NORMAL $COLOR
+	exit 1
+    fi
+fi
 
 if [ "$RELEASE" = "yes" -a "$PUBLISH" = "yes" ]
 then
@@ -238,6 +315,45 @@ fi
 BRANCH=${GIT_BRANCH##*/}
 opts="$opts --branch=$BRANCH"
 
+if [ "$BUILD_CAUSE" = "GHPRBCAUSE" ]
+then
+  if [ $(${SRCDIR}/deploy/commit_type_check.sh origin/$ghprbTargetBranch ${SRCDIR}/deploy/inv_commit_title.msg) = "BADCOMMIT" ]
+  then
+      RED $COLOR
+      cat <<EOF >&2
+=========================================================
+
+WARNING: Pull request contains an invalid commit title.
+
+=========================================================
+EOF
+      NORMAL $COLOR
+#      exit 1
+  fi
+fi
+
+if [ ! -z "${PROMOTE_TO}" ]
+then
+    if ( ${SRCDIR}/deploy/promote.sh ${BRANCH} ${PROMOTE_TO} )
+    then
+	PROMOTE_RELEASE_TAG=$(git tag | grep ${PROMOTE_TO}_release | sort -V | awk '{line=$0} END{print line}')
+	MAJOR=$(echo $PROMOTE_RELEASE_TAG | cut -f2 -d-)
+	MINOR=$(echo $PROMOTE_RELEASE_TAG | cut -f3 -d-)
+	RELEASEV=$(echo $PROMOTE_RELEASE_TAG | cut -f4 -d-)
+    else
+      RED $COLOR
+      cat <<EOF >&2
+=========================================================
+
+ERROR: Problem promoting ${BRANCH} to ${PROMOTE_TO}
+
+=========================================================
+EOF
+      NORMAL $COLOR
+      exit 1
+    fi
+fi
+
 #
 # Make sure submodules have been updated
 #
@@ -249,29 +365,113 @@ fi
 if [ "$RELEASE" = "yes" ]
 then
     NEW_RELEASE=no
-    RELEASE_TAG=$(git tag | grep ${BRANCH}_release | sort -V | awk '{line=$0} END{print line}');
+    if [ -z ${RELEASE_TAG} ]
+    then
+	RELEASE_TAG=$(git tag | grep ${BRANCH}_release | sort -V | awk '{line=$0} END{print line}');
+    fi
     if [ -z ${RELEASE_TAG} ]
     then
 	RELEASE_TAG="${BRANCH}_release-1-0-0"
     fi
-    MAJOR=$(echo $RELEASE_TAG | cut -f2 -d-);
-    MINOR=$(echo $RELEASE_TAG | cut -f3 -d-);
-    RELEASEV=$(echo $RELEASE_TAG | cut -f4 -d-);
-    if [ "$BRANCH" = "stable" ]
+    if [ -z "${PROMOTE_TO}" ]
     then
-	BNAME=""
-    else
-	BNAME="-${BRANCH}"
+	MAJOR=$(echo $RELEASE_TAG | cut -f2 -d-);
+	MINOR=$(echo $RELEASE_TAG | cut -f3 -d-);
+	RELEASEV=$(echo $RELEASE_TAG | cut -f4 -d-);
     fi
     LAST_RELEASE_COMMIT=$(git rev-list -n 1 $RELEASE_TAG)
     if [ "${LAST_RELEASE_COMMIT}" != "${GIT_COMMIT}" ]
     then
-	NEW_RELEASE=yes
-	let RELEASEV=$RELEASEV+1;
-	RELEASE_TAG=${BRANCH}_release-${MAJOR}-${MINOR}-${RELEASEV};
+	if [ -z "${PROMOTE_TO}" ]
+	then
+	    version_inc=$(${SRCDIR}/deploy/commit_type_check.sh "${LAST_RELEASE_COMMIT}" ${SRCDIR}/deploy/inv_commit_title.msg)
+	else
+	    version_inc=PROMOTE
+	fi
+	case "$version_inc" in
+	    PROMOTE)
+		NEW_RELEASE=yes
+		;;
+	    BADCOMMIT)
+		RED $COLOR
+		cat <<EOF >&2
+=========================================================
+
+WARNING: Commit contains an invalid commit title.
+
+=========================================================
+EOF
+		NORMAL $COLOR
+		#exit 1
+		NEW_RELEASE=yes
+		let RELEASEV=$RELEASEV+1
+		;;
+	    SAME)
+		GREEN $COLOR
+		cat <<EOF >&2
+=========================================================
+
+INFO: All commits are of category Build, Docs or Tests.
+      No new release generated.
+
+=========================================================
+
+EOF
+		NORMAL $COLOR
+		NEW_RELEASE=no
+		;;
+	    MINOR)
+		GREEN $COLOR
+		cat <<EOF >&2
+=========================================================
+
+INFO: New features added. New release will be a minor
+      version increase.
+
+=========================================================
+
+EOF
+		NORMAL $COLOR
+		NEW_RELEASE=yes
+		let MINOR=$MINOR+1
+		let RELEASEV=0
+		;;
+	    PATCH)
+		GREEN $COLOR
+		cat <<EOF >&2
+=========================================================
+
+INFO: No new features added. Fix commits added so
+      new release will be generated with patch version
+      incremented.
+
+=========================================================
+
+EOF
+		NORMAL $COLOR
+		NEW_RELEASE=yes
+		let RELEASEV=$RELEASEV+1
+		;;
+	    *)
+		GREEN $RED
+		cat <<EOF >&2
+=========================================================
+
+INFO: Unknown release check return of $version_inc
+      A patch releases will be created.
+
+=========================================================
+
+EOF
+		NORMAL $COLOR
+	    	NEW_RELEASE=yes
+		let RELEASEV=$RELEASEV+1
+		;;
+	esac
     fi
+    RELEASE_TAG=${BRANCH}_release-${MAJOR}-${MINOR}-${RELEASEV};
     RELEASE_VERSION=${MAJOR}.${MINOR}.${RELEASEV}
-    git log --decorate=full > ${SRCDIR}/ChangeLog
+    git log --decorate=full --no-merges > ${SRCDIR}/ChangeLog
     opts="$opts --release=${RELEASE_VERSION} --gitcommit=${GIT_COMMIT}"
     cat <<EOF > ${SRCDIR}/trigger.version
 NEW_RELEASE=${NEW_RELEASE}
@@ -331,8 +531,8 @@ then
   "tag_name":"${RELEASE_TAG}",
   "target_commitish":"${BRANCH}",
   "name":"${RELEASE_TAG}",
-  "body":"Commits since last release:\n\n 
-$(git log --decorate=full ${LAST_RELEASE_COMMIT}..HEAD | awk '{print $0"\\n"}')"
+  "body":"Commits since last release:\n\n
+$(git log --decorate=full --no-merges ${LAST_RELEASE_COMMIT}..HEAD | awk '{gsub("\"","\\\"");print $0"\\n"}')"
 }
 EOF
 	   if ( ! grep tag_name ${WORKSPACE}/tag_release.log > /dev/null )
@@ -356,11 +556,11 @@ EOF
 	RED $COLOR
 	cat <<EOF >&2
 =========================================================
-                                                        
-Attempt to tag a new release without first triggering   
-a release build with the --release option.              
-FAILURE                                                  
-                                                         
+
+Attempt to tag a new release without first triggering
+a release build with the --release option.
+FAILURE
+
 =========================================================
 EOF
 	NORMAL $COLOR

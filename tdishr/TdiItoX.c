@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*      Tdi1ItoX.C
         Convert between axis and index.
 
@@ -19,6 +43,7 @@
         Ken Klare, LANL P-4     (c)1990,1991,1992
         KK      21-Oct-1992     Text requires exact match.
  */
+#include <mdsplus/mdsplus.h>
 #include <STATICdef.h>
 #define beg     0
 #define end     1
@@ -97,6 +122,7 @@ STATIC_CONSTANT DESCRIPTOR_FUNCTION_0(vector0, &OpcVector);
 int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_xd *out_ptr)
 {
   INIT_STATUS;
+  GET_TDITHREADSTATIC_P;
   int j1, left, right, *pcnt = 0, *ptest;
   int k0, k1;
   int special = narg > 1 && list[1] == TdiItoXSpecial;
@@ -123,9 +149,9 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
   unsigned char omits[] = { DTYPE_WITH_UNITS, DTYPE_DIMENSION, 0 };
   dk0.pointer = (char *)&k0;
   dk1.pointer = (char *)&k1;
-  keep[0] = TdiThreadStatic()->TdiRANGE_PTRS[0];
-  keep[1] = TdiThreadStatic()->TdiRANGE_PTRS[1];
-  keep[2] = TdiThreadStatic()->TdiRANGE_PTRS[2];
+  keep[0] = TdiThreadStatic_p->TdiRANGE_PTRS[0];
+  keep[1] = TdiThreadStatic_p->TdiRANGE_PTRS[1];
+  keep[2] = TdiThreadStatic_p->TdiRANGE_PTRS[2];
 	/************************************************************
         Remove and save outer WITH_UNITS.
         8-Apr-1991 allow BUILD_WITH_UNITS(BUILD_DIM(,range),units).
@@ -203,8 +229,10 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
       switch (pslope->ndesc) {
       case 3:
 	fake.ending = pslope->segment[0].ending;
+	MDS_ATTR_FALLTHROUGH
       case 2:
 	fake.begin = pslope->segment[0].begin;
+	MDS_ATTR_FALLTHROUGH
       case 1:
 	fake.deltaval = pslope->segment[0].slope;
 	break;
@@ -236,6 +264,7 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
 			/*********************
                 WARNING falls through.
 			 *********************/
+      MDS_ATTR_FALLTHROUGH
     case DTYPE_RANGE:
       status = TdiGetArgs(opcode, nran = paxis->ndesc, &paxis->begin, sig, uni, dat, cats);
       nseg = HUGE;
@@ -477,9 +506,9 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
 	} else if (arg1) {
 	  struct descriptor_range *rptr = (struct descriptor_range *)list[1];
 	  MdsFree1Dx(out_ptr, NULL);
-	  TdiThreadStatic()->TdiRANGE_PTRS[0] = &dk0;
-	  TdiThreadStatic()->TdiRANGE_PTRS[1] = &dk1;
-	  TdiThreadStatic()->TdiRANGE_PTRS[2] = flag ? 0 : dimen.pointer;
+	  TdiThreadStatic_p->TdiRANGE_PTRS[0] = &dk0;
+	  TdiThreadStatic_p->TdiRANGE_PTRS[1] = &dk1;
+	  TdiThreadStatic_p->TdiRANGE_PTRS[2] = flag ? 0 : dimen.pointer;
 						/******************************************************
 						 * For subscripts of signals, want range step to be all.
 						 ******************************************************/
@@ -494,9 +523,9 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
 	    status = TdiGetArgs(opcode, 1, &rptr, &sig1, &uni1, out_ptr, cats);
 	  } else
 	    status = TdiGetArgs(opcode, 1, &rptr, &sig1, &uni1, out_ptr, cats);
-	  TdiThreadStatic()->TdiRANGE_PTRS[0] = keep[0];
-	  TdiThreadStatic()->TdiRANGE_PTRS[1] = keep[1];
-	  TdiThreadStatic()->TdiRANGE_PTRS[2] = keep[2];
+	  TdiThreadStatic_p->TdiRANGE_PTRS[0] = keep[0];
+	  TdiThreadStatic_p->TdiRANGE_PTRS[1] = keep[1];
+	  TdiThreadStatic_p->TdiRANGE_PTRS[2] = keep[2];
 	  arg1 = cats[0].in_dtype != DTYPE_MISSING;
 	} else
 	  status = TdiDtypeRange(&dk0, &dk1, out_ptr MDS_END_ARG);
@@ -609,13 +638,13 @@ int Tdi1ItoX(int opcode, int narg, struct descriptor *list[], struct descriptor_
 	  status = TdiGetLong(&xat0, &left);
 	if STATUS_OK {
 	  N_ELEMENTS(paxis, right);
-	}
-	left = -left;
-	right += left - 1;
-	if (k0 < left)
-	  k0 = left;
-	if (k1 > right)
-	  k1 = right;
+	  left = -left;
+	  right += left - 1;
+	  if (k0 < left)
+	    k0 = left;
+	  if (k1 > right)
+	    k1 = right;
+        }
       } else {
 	if STATUS_OK
 	  status = TdiLbound(axis.pointer, &dk0 MDS_END_ARG);

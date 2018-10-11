@@ -7,18 +7,7 @@ package jScope;
 // $Id$
 //
 // ---------------------------------------------------------------------------------------------
-
-import jScope.TWUProperties;
-import jScope.TWUFetchOptions;
-import java.io.*;
-import java.net.*;
-import java.util.*;
-import java.awt.*;
-import javax.swing.*;
-import java.awt.event.*;
-import java.lang.InterruptedException;
-
-// ---------------------------------------------------------------------------------------------
+import java.io.IOException;
 
 class TwuWaveData
     implements WaveData
@@ -64,7 +53,6 @@ class TwuWaveData
           abscissa_X = new TwuSingleSignal (dp, mainSignal);
 
     }
-    public void setContinuousUpdate(boolean continuopusUpdate){}
 
     public void
     setZoom (float xmin, float xmax, int n_points)
@@ -206,7 +194,7 @@ class TwuWaveData
             }
             catch (Exception   e)
             {
-                mainSignal.handleException(e);
+                TwuSingleSignal.handleException(e);
                 throw new IOException(e.toString());
             }
         }

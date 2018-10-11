@@ -14,7 +14,7 @@
 #
 #   Defines VALGRIND_CHECK_RULES which should be substituted in your
 #   Makefile; and $enable_valgrind which can be used in subsequent configure
-#   output. VALGRIND_ENABLED is defined and substituted, and corresponds to
+#   output. ENABLE_VALGRIND is defined and substituted, and corresponds to
 #   the value of the --enable-valgrind option, which defaults to being
 #   enabled if Valgrind is installed and disabled otherwise.
 #
@@ -59,32 +59,49 @@
 
 dnl TODO: add custom valgrind installation and VALGRIND_LIB
 AC_DEFUN([AX_VALGRIND_CHECK],[
-	dnl Check for --enable-valgrind	
+	m4_pushdef([enable_valgrind],m4_default($1,[ENABLE_VALGRIND]))
+
+	dnl Check for --enable-valgrind
 	AC_ARG_ENABLE([valgrind],
-	              [AS_HELP_STRING([--enable-valgrind], 
+	              [AS_HELP_STRING([--enable-valgrind],
 		                      [Whether to enable Valgrind on the unit tests])],
 	              [enable_valgrind=$enableval],[enable_valgrind="yes"])
 
-	# Check for Valgrind.
-	AC_CHECK_PROG([VALGRIND],[valgrind],[valgrind])
-
-	AS_IF([test "$enable_valgrind" = "yes" -a "$VALGRIND" = ""],[
+	AS_VAR_IF(enable_valgrind,[yes], [
+	  # check for valgrind program
+	  AC_CHECK_PROG([VALGRIND],[valgrind],[valgrind])
+	  AS_IF([test "${VALGRIND}" = ""],[
 		AC_MSG_WARN([Could not find valgrind; either install it or reconfigure with --disable-valgrind])
-		enable_valgrind="no"
-	])
-	
-	# Enable valgrind only in debug mode (WARNING $enable_debug must be used to selec debug mode)
-	AS_IF([test "$enable_valgrind" = "yes" -a x"$enable_debug" = x"yes"],[:],[
-	        AC_MSG_WARN([Valgrind works onli in debug mode, either reconfigure with --enable-debug or --disable-valgrind])
-		enable_valgrind="no"
+		AS_VAR_SET(enable_valgrind,[no])
+	  ])
+	  # Enable valgrind only in debug mode (WARNING $enable_debug must be used to selec debug mode)
+	  AS_VAR_IF(enable_debug,[yes],[:],[
+	    AC_MSG_WARN([Valgrind works only in debug mode, either reconfigure with --enable-debug or --disable-valgrind])
+	    AS_VAR_SET(enable_valgrind,[no])
+	  ])
 	])
 
-	AM_CONDITIONAL([VALGRIND_ENABLED],[test "$enable_valgrind" = "yes" ])
-	AC_SUBST([VALGRIND_ENABLED],[$enable_valgrind])
+	# Looking for Valgrind specific headers
+	AS_VAR_IF([enable_valgrind],[yes],
+		  AC_CHECK_HEADER([valgrind/valgrind.h],
+				  AS_VAR_SET([have_valgrind_h],[yes]),
+				  AS_VAR_SET([have_valgrind_h],[no]))
+		  AC_CHECK_HEADER([valgrind/memcheck.h],
+				  AS_VAR_SET([have_valgrind_memcheck_h],[yes]),
+				  AS_VAR_SET([have_valgrind_memcheck_h],[no])))
+	AS_VAR_IF([have_valgrind_h],[yes],
+		  AC_DEFINE(HAVE_VALGRIND_H, 1,
+		   [Define to 1 if you have the <valgrind/valgrind.h> header file.]))
+	AS_VAR_IF([have_valgrind_memcheck_h],[yes],
+		  AC_DEFINE(HAVE_VALGRIND_MEMCHECK_H, 1,
+		   [Define to 1 if you have the <valgrind/memcheck.h> header file.]))
 
+	# AM CONDITIONAL
+	AM_CONDITIONAL(enable_valgrind,[test "${enable_valgrind}" = "yes" ])
+	AC_SUBST(enable_valgrind)
 
 	AC_ARG_WITH([valgrind-lib],
-	              [AS_HELP_STRING([--with-valgrind-lib], 
+	              [AS_HELP_STRING([--with-valgrind-lib],
 		                      [Set Valgrind lib directory])],
 	              [valgrind_dir=$withval])
 	AS_VAR_SET_IF([VALGRIND_LIB], AS_VAR_SET([valgrind_dir],[${VALGRIND_LIB}]))
@@ -92,7 +109,11 @@ AC_DEFUN([AX_VALGRIND_CHECK],[
 	AM_SUBST_NOTMAKE([VALGRIND_LIB])
 
 	AC_MSG_CHECKING([whether to enable Valgrind on the unit tests])
-	AC_MSG_RESULT([$enable_valgrind])
+	AC_MSG_RESULT(${enable_valgrind})
+
+
+
+
 
 	# Check for Valgrind tools we care about.
 	m4_define([valgrind_tool_list],[[memcheck], [helgrind], [drd], [exp-sgcheck]])
@@ -117,16 +138,16 @@ AC_DEFUN([AX_VALGRIND_CHECK],[
 
 
 
-dnl 
+dnl
 dnl  Parsed substitutions
-dnl 
+dnl
 AS_VAR_READ([VALGRIND_CHECK_RULES_PRE],[
 VALGRIND_LIB             ?= ${VALGRIND_LIB}
 ])
 
-dnl 
+dnl
 dnl  Not parsed substitutions
-dnl 
+dnl
 VALGRIND_CHECK_RULES='
 # //////////////////////////////////////////////////////////////////////////// #
 # /// Valgrind check  //////////////////////////////////////////////////////// #
@@ -143,7 +164,8 @@ VALGRIND_CHECK_RULES='
 
 # Optional variables
 VALGRIND_FLAGS           ?=
-VALGRIND_FLAGS           += --num-callers=30 \
+VALGRIND_FLAGS           += --gen-suppressions=all \
+                            --num-callers=30 \
                             --trace-children=yes \
                             --child-silent-after-fork=yes \
                             --trace-children-skip-by-arg=*SetMdsplusFileProtection*
@@ -152,7 +174,7 @@ VALGRIND_memcheck_FLAGS  ?=
 VALGRIND_memcheck_FLAGS  += --leak-check=full --show-reachable=no
 
 VALGRIND_helgrind_FLAGS  ?=
-VALGRIND_helgrind_FLAGS  += --history-level=approx
+VALGRIND_helgrind_FLAGS  += --history-level=full
 
 VALGRIND_drd_FLAGS       ?=
 VALGRIND_drd_FLAGS       +=
@@ -166,7 +188,7 @@ VALGRIND_SUPPRESSIONS    += $(addprefix --suppressions=,$(VALGRIND_SUPPRESSIONS_
 VALGRIND_SUPPRESSIONS_PY ?=
 VALGRIND_SUPPRESSIONS_PY += --suppressions=$(top_srcdir)/conf/valgrind-python.supp \
                             $(addprefix --suppressions=,$(VALGRIND_SUPPRESSIONS_FILES_PY))
-                            
+
 
 VALGRIND_TOOLS ?= memcheck helgrind drd sgcheck
 
@@ -179,10 +201,11 @@ VALGRIND_LOGS            ?= $(foreach ext,$(TEST_EXTENSIONS),$(valgrind__test_lo
 # Internal use
 valgrind_log_files = $(addprefix valgrind-suite-,$(addsuffix .log,$(VALGRIND_TOOLS))) \
                      $(TEST_LOGS:.log=-valgrind-*.log) \
+		     $(TEST_LOGS:.log=-valgrind-*.log.core.*) \
                      $(TEST_LOGS:.log=-valgrind-*.xml) \
                      $(TEST_LOGS:.log=-valgrind-*.supp)
 dnl                  $(foreach tst,$(TESTS),$(addprefix $(tst)-valgrind-,$(addsuffix .xml,$(VALGRIND_TOOLS))))
-                     
+
 valgrind_supp_files = $(addsuffix -valgrind.supp,$(TESTS))
 
 valgrind_memcheck_flags = --tool=memcheck $(VALGRIND_memcheck_FLAGS)
@@ -222,8 +245,7 @@ VALGRIND_LOG_COMPILER = \
 
 .PHONY: tests-valgrind tests-valgrind-tool
 .PHONY: tests-valgrind-suppressions tests-valgrind-suppressions-tool
-ifeq ($(VALGRIND_ENABLED),yes)
-
+ifeq ($(enable_valgrind),yes)
 
 _print_valgrind_hello = \
   echo ""; \
@@ -236,14 +258,15 @@ _print_valgrind_hello = \
     echo "        $${supp}"; \
   done
 
+$(VALGRIND_LOGS):
 
 tests-valgrind:
 	@ \
 	echo "--- VALGRIND TESTS --- enabled tools: $(foreach tool,$(VALGRIND_TOOLS), $(tool))"; \
-	$(MAKE) VALGRIND_BUILD="yes"; \
+	$(MAKE) -k $(BUILD_FLAGS) $(AM_MAKEFLAGS) all VALGRIND_BUILD="yes"; \
 	$(foreach tool,$(VALGRIND_TOOLS), \
 		$(if $(VALGRIND_HAVE_TOOL_$(tool))$(VALGRIND_HAVE_TOOL_exp_$(tool)), \
-			$(MAKE) $(AM_MAKEFLAGS) -k tests-valgrind-tool VALGRIND_TOOL=$(tool); \
+			$(MAKE) -k $(TEST_FLAGS) $(AM_MAKEFLAGS) tests-valgrind-tool VALGRIND_TOOL=$(tool); \
 		) \
 	)
 
@@ -303,6 +326,7 @@ dnl VALGRIND_CHECK_RULES subsituition
 AC_SUBST([VALGRIND_CHECK_RULES],["${VALGRIND_CHECK_RULES_PRE} ${VALGRIND_CHECK_RULES}"])
 m4_ifdef([_AM_SUBST_NOTMAKE], [_AM_SUBST_NOTMAKE([VALGRIND_CHECK_RULES])])
 
+m4_pushdef([enable_valgrind])
 ])
 
 

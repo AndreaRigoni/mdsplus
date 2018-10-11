@@ -1,12 +1,15 @@
 package jScope;
 
 /* $Id$ */
-import java.io.*;
-import java.nio.*;
-import java.net.*;
-import java.awt.*;
-import java.util.*;
-import java.util.zip.*;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Vector;
+import java.util.zip.InflaterInputStream;
 
 
 public class MdsMessage extends Object
@@ -37,7 +40,7 @@ public class MdsMessage extends Object
     protected   boolean swap = false;
     protected   boolean compressed = false;
 
-    private     Vector  connection_listener = null;
+    private     Vector<ConnectionListener> connectionListeners = null;
 
     public MdsMessage()
     {
@@ -55,15 +58,15 @@ public class MdsMessage extends Object
         this(c, null);
     }
 
-    public MdsMessage(String s, Vector v)
+    public MdsMessage(String s, Vector<ConnectionListener> v)
     {
-        connection_listener = v;
+        connectionListeners = v;
         BuildMdsMessage((byte)0, Descriptor.DTYPE_CSTRING, (byte)1, null, s.getBytes());
     }
 
-    public MdsMessage(byte c, Vector v)
+    public MdsMessage(byte c, Vector<ConnectionListener> v)
     {
-        connection_listener = v;
+        connectionListeners = v;
         byte buf[] = new byte[1];
         buf[0] = c;
         BuildMdsMessage((byte)0, Descriptor.DTYPE_CSTRING, (byte)1, null, buf);
@@ -139,7 +142,6 @@ public class MdsMessage extends Object
  //   protected /*synchronized */void ReadBuf(byte buf[], DataInputStream dis) throws IOException
     protected synchronized  void ReadBuf(byte buf[], InputStream dis) throws IOException
     {
-        
         ConnectionEvent e;
         int bytes_to_read = buf.length, read_bytes = 0, curr_offset = 0;
         boolean send = false;
@@ -154,13 +156,14 @@ public class MdsMessage extends Object
         while(bytes_to_read > 0)
         {                
             read_bytes     = dis.read(buf, curr_offset, bytes_to_read);
-	        curr_offset   += read_bytes;
-	        bytes_to_read -= read_bytes;
-	        if(send)
-	        {
-	            e = new ConnectionEvent(this, buf.length, curr_offset);
-	            dispatchConnectionEvent(e);
-	        }
+	    if(read_bytes < 0) throw new IOException("Read Operation Failed");
+	    curr_offset   += read_bytes;
+	    bytes_to_read -= read_bytes;
+	    if(send)
+	    {
+		e = new ConnectionEvent(this, buf.length, curr_offset);
+		dispatchConnectionEvent(e);
+	    }
         }
     }
 
@@ -413,11 +416,11 @@ public class MdsMessage extends Object
 
     synchronized protected void dispatchConnectionEvent(ConnectionEvent e)
     {
-        if (connection_listener != null)
+        if (connectionListeners != null)
         {
-            for(int i = 0; i < connection_listener.size(); i++)
+            for(int i = 0; i < connectionListeners.size(); i++)
             {
-                ((ConnectionListener)connection_listener.elementAt(i)).processConnectionEvent(e);
+                ((ConnectionListener)connectionListeners.elementAt(i)).processConnectionEvent(e);
             }
         }
     }

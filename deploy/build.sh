@@ -23,6 +23,7 @@ SYNOPSIS
                [--distname=name] [--updatepkg] [--eventport=number]
                [--arch=name] [--color] [--winhost=hostname]
                [--winbld=dir] [--winrembld=dir] [--gitcommit=commit]
+               [--jars] [--make-jars] [--docker-srcdir=dir]
 
 DESCRIPTION
     The build.sh script is used for building, testing and deploy MDSplus
@@ -32,7 +33,7 @@ DESCRIPTION
      deployment scripts in the mdsplus-deploy git package.
 
     The build.sh script will only build MDSplus for one target operating
-    system per invocation of the script. One must specify whether you 
+    system per invocation of the script. One must specify whether you
     want to perform the standard tests on the MDSplus software, build
     the installers, or publish the installers to a public repository
     using the --test, --release=version and/or --publish=version command
@@ -60,7 +61,7 @@ DESCRIPTION
 
     If you have changed the packaging, for example adding a new library, header,
     tdi function or any other file that would be included in an installer the
-    above test will fail. You will need to issue the following commands to 
+    above test will fail. You will need to issue the following commands to
     update the package contents checking files to refleact the changes.
     issue the following commands:
 
@@ -102,6 +103,13 @@ OPTIONS
        output of the tests use the log option. The tap option will publish
        the results in a standard tap format which only gives pass or fail
        information.
+
+    --test_timeunit=float-point-number
+       Multiplier to apply to tests timeouts. If this option is used the
+       timeout time for a test will be set to this value times the normal
+       timeout for the test. For example, --test_timeunit=2.5 would
+       allow the tests to run 2.5 as long as the normally do before being
+       stopped with a timeout error.
 
    --eventport=number
        Select a port number to use for udp event tests. If running
@@ -185,6 +193,22 @@ OPTIONS
     --gitcommit=commit
        Set by trigger jenkins job representing the commit hash of the sources.
 
+    --jars
+       Set by trigger job to indicate that build job should get the java jar
+       files from the trigger source directory instead of building them.
+
+    --make-jars
+       Triggers the generation of the java programs (.jar files)
+
+    --disable-java
+       Do not compile java programs (passes --disable-java to configure)
+
+    --docker-srcdir=dir
+       Specify the directory to use inside the docker containers used to build
+       the code. If not specified the docker containers will use the
+       full directory spec of the parent directory of the build.sh
+       on the host.
+
 OPTIONS WITH OS SPECIFIC DEFAULT
 
    --platform=name
@@ -203,6 +227,9 @@ OPTIONS WITH OS SPECIFIC DEFAULT
        operation. The default --distname option will be set if using a
        supported operating system.
 
+    --valgrind
+       Enable valgrind testing for this build.
+
     --valgrind=tests
        Select a set of valgrind tests to perform on the MDSplus code if
        the --test option is included. This is a comma delimited list of
@@ -211,6 +238,9 @@ OPTIONS WITH OS SPECIFIC DEFAULT
        supported operating system a default list of tests supported for
        that operating system will be used unless overriden in the
        command line.
+
+    --sanitize
+       Enable sanitize testing for this build.
 
     --sanitize=tests
        Select a set of sanitize tests to perform on the MDSplus code if
@@ -258,6 +288,9 @@ parsecmd() {
 	    --test_format=*)
 		TEST_FORMAT="${i#*=}"
 		;;
+	    --test_timeunit=*)
+		TEST_TIMEUNIT="${i#*=}"
+		;;
 	    --eventport=*)
 		EVENT_PORT="${i#*=}"
 		;;
@@ -280,14 +313,20 @@ parsecmd() {
 	    --platform=*)
 		PLATFORM="${i#*=}"
 		;;
+	    --valgrind)
+		ENABLE_VALGRIND=yes
+		;;
 	    --valgrind=*)
-		if [ -z "$VALGRIND_TOOLS" ]
+		if [ "${ENABLE_VALGRIND}" = "yes" ]
 		then
 		    VALGRIND_TOOLS="${i#*=}"
 		fi
 		;;
+	    --sanitize)
+		ENABLE_SANITIZE=yes
+		;;
 	    --sanitize=*)
-		if [ -z "$SANITIZE" ]
+		if [ "$ENABLE_SANITIZE" = "yes" ]
 		then
 		    SANITIZE="${i#*=}"
 		fi
@@ -343,6 +382,18 @@ parsecmd() {
 	    --gitcommit=*)
 		GIT_COMMIT="${i#*=}"
 		;;
+	    --jars)
+		JARS_DIR="$(realpath $(dirname ${0})/../jars)"
+		;;
+	    --make-jars)
+		MAKE_JARS="yes"
+		;;
+	    --disable-java)
+		CONFIGURE_PARAMS="$CONFIGURE_PARAMS --disable-java"
+		;;
+	    --docker-srcdir=*)
+		DOCKER_SRCDIR="${i#*=}"
+		;;
 	    *)
 		unknownopts="${unknownopts} $i"
 		;;
@@ -362,6 +413,10 @@ opts="$@"
 parsecmd "$opts"
 
 SRCDIR=$(realpath $(dirname ${0})/..)
+if [ -z "${DOCKER_SRCDIR}" ]
+then
+   DOCKER_SRCDIR="${SRCDIR}"
+fi
 
 #
 # Get the default options for the OS specified.
@@ -411,15 +466,15 @@ NORMAL() {
 
 if [ "$RELEASE" = "yes" -o "$PUBLISH" = "yes" ]
 then
-    if [ -r $PUBLISHDIR/${DISTNAME}/${BRANCH}_${RELEASE_VERSION} ]
+    if [ -r $PUBLISHDIR/${DISTNAME}/${BRANCH}_${RELEASE_VERSION}_${OS} ]
     then
 	GREEN $COLOR
 	cat <<EOF
 ==================================================================
-                                                                  
-A ${RELEASE_VERSION} ${BRANCH} release already exists for ${OS}.  
-The build will be skipped.                                        
-                                                                  
+
+A ${RELEASE_VERSION} ${BRANCH} release already exists for ${OS}.
+The build will be skipped.
+
 ==================================================================
 EOF
 	NORMAL $COLOR
@@ -439,11 +494,14 @@ fi
 # Make sure one of --test --release=version
 # --publish=version options were provided.
 #
-if [ "${TEST}" != "yes"  \
-	       -a  "${RELEASE}" != "yes" \
-	       -a  "${PUBLISH}" != "yes" ]
+echo "${ENABLE_SANITIZE}"
+echo "${SANITIZE}"
+if [ "${TEST}"            != "yes"  \
+ -a  "${MAKE_JARS}"       != "yes"  \
+ -a  "${RELEASE}"         != "yes"  \
+ -a  "${PUBLISH}"         != "yes"  ]
 then
-    >&2 echo "None of --test --release=version --publish=version options specified on the command. Nothing to do!"
+    >&2 echo "None of --test --make-jars --release=version --publish=version options specified on the command or skipped. Nothing to do!"
     exit 0
 fi
 #
@@ -515,7 +573,7 @@ spacedelim() {
     fi
     echo $ans
 }
-    
+
 DOCKERFILE="$(spacedelim $DOCKERFILE)"
 DOCKERIMAGE="$(spacedelim $DOCKERIMAGE)"
 #
@@ -581,7 +639,9 @@ fi
 OS=${OS} \
   TEST=${TEST} \
   TEST_FORMAT=${TEST_FORMAT} \
+  TEST_TIMEUNIT=${TEST_TIMEUNIT} \
   EVENT_PORT=${EVENT_PORT} \
+  MAKE_JARS=${MAKE_JARS} \
   RELEASE=${RELEASE} \
   PUBLISH=${PUBLISH} \
   RELEASE_VERSION=${RELEASE_VERSION} \
@@ -589,6 +649,7 @@ OS=${OS} \
   VALGRIND_TOOLS=${VALGRIND_TOOLS} \
   SANITIZE=${SANITIZE} \
   SRCDIR=${SRCDIR} \
+  DOCKER_SRCDIR="$DOCKER_SRCDIR" \
   BRANCH=${BRANCH} \
   WORKSPACE=${WORKSPACE} \
   RELEASEDIR=${RELEASEDIR} \
@@ -605,15 +666,17 @@ OS=${OS} \
   WINREMBLD="${WINREMBLD}" \
   GIT_COMMIT="${GIT_COMMIT}" \
   INTERACTIVE="$INTERACTIVE" \
+  JARS_DIR="$JARS_DIR" \
+  CONFIGURE_PARAMS="$CONFIGURE_PARAMS" \
   ${SRCDIR}/deploy/platform/platform_build.sh
 if [ "$?" != "0" ]
 then
     RED $COLOR
     cat <<EOF >&2
 ============================================
-                                            
-Failure: The build was unsuccessful!        
-                                            
+
+Failure: The build was unsuccessful!
+
 ============================================
 EOF
     NORMAL $COLOR
@@ -622,14 +685,14 @@ else
     GREEN $COLOR
     cat <<EOF
 ============================================
-                                            
-Success!                                    
-                                            
+
+Success!
+
 ============================================
 EOF
     NORMAL $COLOR
     if [ "$PUBLISH" = "yes" ]
     then
-	touch $PUBLISHDIR/${BRANCH}_${RELEASE_VERSION}
+	touch $PUBLISHDIR/${BRANCH}_${RELEASE_VERSION}_${OS}
     fi
 fi

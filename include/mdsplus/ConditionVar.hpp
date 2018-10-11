@@ -18,12 +18,13 @@
 #include <pthread.h>
 #endif
 
-#ifdef MDS_MAC
+#ifdef MDS_MACxxx
 #include <mach/clock.h>
 #include <mach/mach.h>
-
+#ifndef CLOCK_REALTIME
 #define CLOCK_REALTIME 0
-static void clock_gettime(int dummyClock, timespec * ts) {
+#endif
+static void clock_gettime(int dummyClock __attribute__ ((unused)), timespec * ts) {
 	clock_serv_t cclock;
 	mach_timespec_t mts;
 	host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);

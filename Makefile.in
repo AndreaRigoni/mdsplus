@@ -11,51 +11,63 @@ VPATH=@srcdir@
 @TARGET_SELFHELP@
 HELP_DESCRIPTION = This is MDSplus build system, documented targets follow:
 
-JAVA_APS = javamds \
+JAVA_JAR = \
 	   javascope \
-           javatraverser \
+	   javatraverser \
+	   javatraverser2 \
 	   javadispatcher \
 	   javadevices \
 	   javaclient \
-	   mdsobjects/java 
+	   mdsobjects/java
 
+JAVA_APS = \
+	   javamds \
+	   javatraverser2/java/mds/mdslib
+
+ifeq "@HAVE_MOTIF@" "yes"
 MOTIF_APS = xmdsshr \
 	    actions \
 	    dwscope \
 	    @IDLMDSWIDGETS@ \
-            mitdevices \
-            traverser
-
+	    mitdevices \
+	    traverser
+else
+MOTIF_APS = actions
+endif
 HDF5_APS = hdf5
 
 D3D_PACKAGE = d3dshr
 
-PARTS = \
-        mdsshr \
-        treeshr \
-        tdishr \
-        tditest \
+ifeq "@JAVA_ONLY@" "yes"
+NON_JAR =
+PARTS = $(JAVA_JAR)
+else
+NON_JAR = \
+	mdsshr \
+	treeshr \
+	tdishr \
+	tditest \
 	xtreeshr \
-        @MDSTCPIP@ \
-        mdslibidl \
-        mdsdcl  \
+	@MDSTCPIP@ \
+	mdslibidl \
+	mdsdcl  \
 	@CAMSHR@ \
-        @REMCAM@ \
-        ccl \
+	@REMCAM@ \
+	ccl \
 	servershr \
-        tcl \
-        @TDIC@ \
-        mdslib \
-        math \
-        wfevent \
-        setevent \
-        mdsmisc \
+	tcl \
+	@TDIC@ \
+	mdslib \
+	math \
+	wfevent \
+	setevent \
+	mdsmisc \
 	scripts \
 	rpm \
 	mdsobjects/cpp \
-        manpages \
-        @D3D_PACKAGE@ \
-        @JAVA_APS@ \
+	manpages \
+	@D3D_PACKAGE@ \
+	@JAVA_APS@ \
 	@MOTIF_APS@ \
 	@MDSSQL@ \
 	@IDLMDSEVENT@ \
@@ -63,10 +75,11 @@ PARTS = \
 	@LV@ \
 	LabView \
 	@MACOSX@
+@MINGW_TRUE@ NON_JAR += icons
+@ENABLE_TESTS_TRUE@ NON_JAR += testing
 
-@MINGW_TRUE@ PARTS += icons
-@ENABLE_TESTS_TRUE@ PARTS += testing
-
+PARTS = $(NON_JAR) @JAVA_JAR@
+endif
 
 .PHONY: all $(PARTS)
 all: ##@build build all active submodules
@@ -74,7 +87,11 @@ all: $(PARTS)
 
 DIRECTORIES = $(sort @MAKEBINDIR@ @MAKELIBDIR@ @MAKESHLIBDIR@ @MAKEUIDDIR@)
 
-$(PARTS): $(DIRECTORIES)
+$(NON_JAR): $(DIRECTORIES)
+@MINGW_FALSE@	$(MAKE) -C $@ @MAKEFLAG_J@ @MAKEFLAG_O@
+@MINGW_TRUE@	$(MAKE) -C $@
+# override parallel flags for java apps
+$(JAVA_JAR): $(DIRECTORIES)
 	$(MAKE) -C $@
 
 .PHONY: docs
@@ -96,18 +113,34 @@ $(clean_DIRS):
 clean_DOCS: ##@docs clean generated documentation
 	$(MAKE) -C docs clean
 
+.PHONY: distclean
 
+distclean: ##@build make source directory look like original sources
+	@cpwd=$$(pwd); \
+	cd @top_srcdir@; \
+	if [ -r .git ]; \
+	then \
+	  git clean -x -f -d -q; \
+	else \
+	  if [ "$$(pwd)" == "$$cpwd" ]; \
+	     then make full_clean > /dev/null; \
+	  fi; \
+	  rm -Rf ./mdsobjects/python/build; \
+	fi; \
+	cd $$cpwd
 
-# Testing 
+# Testing
 
 .PHONY: tests
 tests: ##@tests recursively perform tests in submodules
 @ENABLE_TESTS_TRUE@	$(MAKE) $(AM_MAKEFLAGS) -C testing all tests
 @ENABLE_TESTS_FALSE@	@echo "Tests disabled"
 
-.PHONY: tests-valgrind
-tests-valgrind: ##@tests recursively perform tests using valgrind tool
-@ENABLE_TESTS_TRUE@	$(MAKE) $(AM_MAKEFLAGS) -C testing all tests-valgrind
+.PHONY: tests-valgrind rebuild-tests
+tests-valgrind: ##@tests perform tests using valgrind tool
+rebuild-tests:  ##@tests rebuild all tests binaries
+tests-valgrind rebuild-tests:
+@ENABLE_TESTS_TRUE@	$(MAKE) $(AM_MAKEFLAGS) -C testing all $@
 @ENABLE_TESTS_FALSE@	@echo "Tests disabled"
 
 .PHONY: $(clean_TESTS)
@@ -117,18 +150,14 @@ clean_TESTS: ##@tests clean all tests results and compiled tests objects
 
 .PHONY: full_clean
 full_clean: ##@build perform deep clean of build directories
-full_clean: ./devscripts/rm_if clean
-	@ $< bin bin64 bin32 bin_x86 bin_x86_64
-	@ $< etc
-	@ $< lib lib64 lib32
-	@ $< java/classes
-	@ $< java
-	@ $< uid uid64 uid32
-	@ $< config.cache
-	@ $< config.log
-	@ $< `find . -name '*.in' | \
-	      grep -v configure.in | grep -v makekit.in | \
-	      $(AWK) '{print substr($$1,0,length($$1)-3)}'`
+full_clean: clean
+	@rm -Rf bin bin64 bin32 bin_x86 bin_x86_64 etc \
+		lib lib64 lib32 java uid uid64 uid32 \
+		config.cache config.log config.status aclocal.m4 \
+		include/stamp-h1 autom4te.cache \
+		$$(find . -name '.deps') \
+		`find . -name '*.in' | \
+	      	$(AWK) '{print substr($$1,0,length($$1)-3)}'`
 
 .PHONY: depend
 depend:
@@ -137,7 +166,7 @@ depend:
 	  cd $${dir}; $${MAKE:=make} depend > /dev/null 2> /dev/null; cd $$cdir;\
 	done
 
-MISC_PARTS = tdi idl trees setup.sh setup.csh ChangeLog mdsplus.ico include mdsobjects/python desktop pixmaps matlab php epics xml
+MISC_PARTS = tdi pydevices idl trees setup.sh setup.csh ChangeLog mdsplus.ico include mdsobjects/python desktop pixmaps matlab php epics xml nodejs
 
 install_DIRS = $(addprefix install_, $(PARTS))
 $(install_DIRS):
@@ -146,9 +175,9 @@ $(install_DIRS):
 .PHONY: install
 install: ##@build build and install active modules to prefix directory
 install: $(install_DIRS)
-	- find $(prefix)/java -name '*.class' -delete #### No need to include class files
 	$(MKDIR_P) $(prefix)/local/tdi
 	$(MKDIR_P) $(prefix)/java
+	- find $(prefix)/java -name '*.class' -delete #### No need to include class files
 	tar -C ${top_srcdir} \
 		--exclude='.gitignore' \
 		--exclude='*.pyc' \
@@ -158,13 +187,28 @@ install: $(install_DIRS)
 		--exclude='*egg-info' \
 		--exclude='*\.in' \
 		--exclude='Makefile\.*' \
-		-cf  - $(MISC_PARTS) | (cd $(exec_prefix); tar -xvf -)
+		-cf  - $(MISC_PARTS) | (cd $(exec_prefix); tar -xf -)
 	find . -name '_version\.py' -not -path "./$(realpath --relative-to=$(pwd) $(exec_prefix))/*" -exec cp {} $(exec_prefix)/{} \;
-	tar -C ${top_builddir} -cf - include/config.h | (cd $(exec_prefix); tar -xf -) ## TODO: remove this and config.h from headers ...
+	tar -C ${top_builddir} -cf - include/mdsplus/mdsconfig.h | (cd $(exec_prefix); tar -xf -) ## TODO: remove this and config.h from headers ...
 	if [ ! -z "$$MDSPLUS_VERSION" ]; then echo "mdsplus_version='$$MDSPLUS_VERSION'" > $(exec_prefix)/mdsobjects/python/mdsplus_version.py; fi
 	$(INSTALL) ${top_srcdir}/MDSplus-License.txt ${top_srcdir}/MDSplus-License.rtf $(exec_prefix)
 	(cd $(exec_prefix); chmod -R 755 $(MISC_PARTS))
 
+.PHONY: tests-envdump
+tests-envdump:
+	cd mdsobjects/python/tests&&(\
+	make test-envdump;\
+	cd ../../..;)
+
+test-env:
+	cd mdsobjects/python/tests&&(\
+	make test-env;\
+	cd ../../..;)
+
+@HAVE_WINE_TRUE@wineconsole:
+@HAVE_WINE_TRUE@	cd mdsobjects/python/tests&&(\
+@HAVE_WINE_TRUE@	make wineconsole;\
+@HAVE_WINE_TRUE@	cd ../../..;)
 
 # Interdependent directories:
 actions: mdsshr tdishr treeshr xmdsshr mdstcpip servershr
@@ -174,14 +218,14 @@ tcl: mdsshr treeshr tdishr mdstcpip servershr mdsdcl
 dwscope: xmdsshr
 javadevices: javatraverser
 javadispatcher: javascope javatraverser
-javamds: mdstcpip 
+javamds: mdstcpip
 javatraverser: javascope
 math: mdsshr
 mdsdcl: mdsshr
 mdslib: mdstcpip
 mdslibidl: tdishr
 mdsmisc: tdishr xtreeshr
-mdsobjects/cpp: mdstcpip 
+mdsobjects/cpp: mdstcpip
 mdsobjects/java: javascope
 mdstcpip: tdishr
 mitdevices: mdsshr tdishr treeshr xmdsshr

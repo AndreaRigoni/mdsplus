@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*------------------------------------------------------------------------------
 
 		Name:   TREE$DO_METHOD
@@ -27,6 +51,9 @@ int TreeDoMethod( nid_dsc, method_dsc [,args]...)
 	Description:
 
 ------------------------------------------------------------------------------*/
+#define DEF_FREED
+#define DEF_FREEXD
+
 #include <STATICdef.h>
 #include <ncidef.h>
 #include "treeshrp.h"
@@ -69,7 +96,7 @@ int TreeDoMethod(struct descriptor *nid_dsc, struct descriptor *method_ptr, ...)
 int TreeDoFun(struct descriptor *funname, int nargs, struct descriptor **args,
 	      struct descriptor_xd *out_ptr)
 {
-  int status;
+  INIT_STATUS;
   static void (*TdiEvaluate) () = 0;
   int i;
   short OpcExtFunction = 162;
@@ -77,50 +104,57 @@ int TreeDoFun(struct descriptor *funname, int nargs, struct descriptor **args,
   STATIC_CONSTANT DESCRIPTOR(tdievaluate, "TdiEvaluate");
   DESCRIPTOR_FUNCTION(fun, &OpcExtFunction, 255);
   void *call_arglist[] = { (void *)3, (void *)&fun, (void *)out_ptr, MdsEND_ARG };
-  fun.ndesc = nargs + 2;
+  fun.ndesc = nargs>253 ? 255 : (unsigned char)(nargs + 2);
   fun.arguments[0] = 0;
   fun.arguments[1] = funname;
   for (i = 0; i < nargs; i++)
     fun.arguments[2 + i] = args[i];
-  if ((status = TdiEvaluate ? 1 : LibFindImageSymbol(&tdishr, &tdievaluate, &TdiEvaluate)) & 1)
+  status = TdiEvaluate ? 1 : LibFindImageSymbol(&tdishr, &tdievaluate, &TdiEvaluate);
+  if STATUS_OK
     status = (int)((char *)LibCallg(call_arglist, TdiEvaluate) - (char *)0);
   return status;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclobbered"
+
 int _TreeDoMethod(void *dbid, struct descriptor *nid_dsc, struct descriptor *method_ptr, ...)
 {
+  INIT_STATUS;
   va_list incrmtr;
-  int status = TreeNOMETHOD;
-  static short conglomerate_elt;
-  static unsigned char data_type;
-  static int head_nid;
+  short conglomerate_elt;
+  unsigned char data_type;
+  int head_nid;
   NCI_ITM itmlst[] = { {1, NciDTYPE, &data_type, 0},
   {2, NciCONGLOMERATE_ELT, (unsigned char *)&conglomerate_elt, 0},
   {4, NciCONGLOMERATE_NIDS, (unsigned char *)&head_nid, 0},
   {0, NciEND_OF_LIST, 0, 0}
   };
   void (*addr) ();
-  static int (*TdiExecute) () = 0;
+  static int (*TdiExecute) () = NULL;
   STATIC_CONSTANT DESCRIPTOR(close, "$)");
   STATIC_CONSTANT DESCRIPTOR(arg, "$,");
   STATIC_CONSTANT DESCRIPTOR(tdishr, "TdiShr");
-  STATIC_CONSTANT DESCRIPTOR(tdiexecute, "TdiExecute");
-  static struct descriptor_xd xd = { 0, 0, CLASS_XD, 0, 0 };
-  static DESCRIPTOR(underunder, "__");
-  static struct descriptor_d method = { 0, DTYPE_T, CLASS_D, 0 };
-  static struct descriptor_conglom *conglom_ptr;
+  const DESCRIPTOR(tdiexecute, "TdiExecute");
+  const DESCRIPTOR(underunder, "__");
   int nargs;
   void *arglist[256];
   count(nargs);
   arglist[0] = arglist_nargs(nargs);
-
-  if (nid_dsc->dtype != DTYPE_NID || (!nid_dsc->pointer))
+  if (!nid_dsc->pointer
+   || (nid_dsc->dtype!=DTYPE_NID
+    && nid_dsc->dtype!=DTYPE_L
+    && nid_dsc->dtype!=DTYPE_LU))
     return TreeNOMETHOD;
   head_nid = 0;
   status = _TreeGetNci(dbid, *(int *)nid_dsc->pointer, itmlst);
-  if (!(status & 1))
+  if STATUS_NOT_OK
     return status;
-
+  struct descriptor_conglom *conglom_ptr;
+  struct descriptor_xd xd = { 0, 0, CLASS_XD, 0, 0 };
+  struct descriptor_d method = { 0, DTYPE_T, CLASS_D, 0 };
+  FREEXD_ON_EXIT(&xd);
+  FREED_ON_EXIT(&method);
   if (conglomerate_elt || (data_type == DTYPE_CONGLOM)) {
     int i;
     arglist[1] = nid_dsc;
@@ -130,72 +164,55 @@ int _TreeDoMethod(void *dbid, struct descriptor *nid_dsc, struct descriptor *met
       arglist[i + 1] = va_arg(incrmtr, struct descriptor *);
     va_end(incrmtr);
     status = _TreeGetRecord(dbid, head_nid ? head_nid : *((int *)nid_dsc->pointer), &xd);
-    if (!(status & 1))
-      return status;
+    if STATUS_NOT_OK goto end;
     conglom_ptr = (struct descriptor_conglom *)xd.pointer;
     if (conglom_ptr->dtype != DTYPE_CONGLOM)
-      return TreeNOT_CONGLOM;
-    if (conglom_ptr->image && conglom_ptr->image->length == strlen("__python__")
-	&& strncmp(conglom_ptr->image->pointer, "__python__", strlen("__python__")) == 0) {
+      {status = TreeNOT_CONGLOM;goto end;}
+    if (conglom_ptr->image
+     && conglom_ptr->image->length == strlen("__python__")
+     && strncmp(conglom_ptr->image->pointer, "__python__", strlen("__python__")) == 0) {
       void *dbid = *TreeCtx();
       /**** Try python class ***/
       struct descriptor_d exp = { 0, DTYPE_T, CLASS_D, 0 };
+      FREED_ON_EXIT(&exp);
+      int _nargs = nargs;
       STATIC_CONSTANT DESCRIPTOR(open, "PyDoMethod(");
       StrCopyDx((struct descriptor *)&exp, (struct descriptor *)&open);
-      if (nargs == 4 && method_ptr->length == strlen("DW_SETUP")
-	  && strncmp(method_ptr->pointer, "DW_SETUP", strlen("DW_SETUP")) == 0) {
+      if (_nargs == 4
+       && method_ptr->length == strlen("DW_SETUP")
+       && strncmp(method_ptr->pointer, "DW_SETUP", strlen("DW_SETUP")) == 0) {
 	arglist[3] = arglist[4];
-	nargs--;
+	_nargs--;
       }
-      for (i = 1; i < nargs - 1; i++)
+      for (i = 1; i < _nargs - 1; i++)
 	StrAppend(&exp, (struct descriptor *)&arg);
       StrAppend(&exp, (struct descriptor *)&close);
-      if (TdiExecute == 0)
+      static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+      pthread_mutex_lock(&lock);
+      if (!TdiExecute)
 	status = LibFindImageSymbol(&tdishr, &tdiexecute, &TdiExecute);
-      if (status & 1) {
-	EMPTYXD(list_xd);
-	struct descriptor_xd *ans_xd=arglist[nargs];
-	DESCRIPTOR_LONG(stat_d,&status);
-	static DESCRIPTOR(dollar_d,"$");
-	arglist[nargs]=&list_xd;
-	for (i = nargs; i > 0; i--)
+      pthread_mutex_unlock(&lock);
+      if STATUS_OK {
+	for (i = _nargs; i > 0; i--)
 	  arglist[i + 1] = arglist[i];
-	nargs += 2;
-	arglist[0] = arglist_nargs(nargs);
+	_nargs += 2;
+	arglist[0] = arglist_nargs(_nargs);
 	arglist[1] = &exp;
-	arglist[nargs] = MdsEND_ARG;
+	arglist[_nargs] = MdsEND_ARG;
 	status = (int)((char *)LibCallg(arglist, TdiExecute) - (char *)0);
-        if (status & 1) {
-	  struct descriptor_a *list = (struct descriptor_a *)list_xd.pointer;
-	  if (list && list->dtype == DTYPE_LIST && list->arsize == (sizeof(void *)*2)) {
-	    struct descriptor *statd = ((struct descriptor **)list->pointer)[0];
-	    struct descriptor *ansd  = ((struct descriptor **)list->pointer)[1];
-	    if (ansd) {
-	      (*TdiExecute)(&dollar_d, ansd,ans_xd, MdsEND_ARG);
-	    } else {
-	      (*TdiExecute)(&dollar_d,statd,ans_xd, MdsEND_ARG);
-	    }
-	  }
-	  else {
-	    (*TdiExecute)(&dollar_d,&stat_d,ans_xd, MdsEND_ARG);
-	    status = 0;
-	  }
-	  MdsFree1Dx(&list_xd,0);
-	}
       }
-      StrFree1Dx(&exp);
+      FREED_NOW(&exp);
       *TreeCtx() = dbid;
-      return status;
+      goto end;
     }
-    StrConcat((struct descriptor *)&method, conglom_ptr->model, (struct descriptor *)&underunder,
-	      method_ptr MDS_END_ARG);
+    StrConcat((struct descriptor *)&method, conglom_ptr->model, (struct descriptor *)&underunder, method_ptr MDS_END_ARG);
     for (i = 0; i < method.length; i++)
-      method.pointer[i] = tolower(method.pointer[i]);
+      method.pointer[i] = (char)tolower(method.pointer[i]);
     if (conglom_ptr->image && conglom_ptr->image->dtype == DTYPE_T)
       status = LibFindImageSymbol(conglom_ptr->image, &method, &addr);
     else
-      status = 0;
-    if (status & 1) {
+      status = TdiINVDTYDSC;
+    if STATUS_OK {
       void *old_dbid = *TreeCtx();
       *TreeCtx() = dbid;
       status = (int)((char *)LibCallg(arglist, addr) - (char *)0);
@@ -220,9 +237,10 @@ int _TreeDoMethod(void *dbid, struct descriptor *nid_dsc, struct descriptor *met
     }
   } else
     status = TreeNOMETHOD;
-  /*
-     if (!(status&1)) lib$signal(status, 0);
-   */
+end: ;
+  FREED_NOW(method);
+  FREEXD_NOW(xd);
   return status;
 }
+#pragma GCC diagnostic pop
 

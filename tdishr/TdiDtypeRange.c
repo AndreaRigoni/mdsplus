@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*      Tdi1DtypeRange.C
         Create array of stepped values of most data types. Default delta is 1.
                 vector = from : to : [delta]
@@ -52,6 +76,7 @@ extern struct descriptor *TdiItoXSpecial;
 int Tdi1DtypeRange(int opcode, int narg, struct descriptor *list[], struct descriptor_xd *out_ptr)
 {
   INIT_STATUS;
+  GET_TDITHREADSTATIC_P;
   unsigned short len;
   unsigned char dtype;
   int cmode = -1, j, nseg = 0, nnew = narg;
@@ -79,11 +104,11 @@ int Tdi1DtypeRange(int opcode, int narg, struct descriptor *list[], struct descr
     DESCRIPTOR_RANGE(range, 0, 0, 0);
     range.begin = &dx0;
     range.ending = &dx1;
-    if (!TdiThreadStatic()->TdiRANGE_PTRS[2])
+    if (!TdiThreadStatic_p->TdiRANGE_PTRS[2])
       return TdiNULL_PTR;
     if (new[0] == 0 && new[1] == 0)
-      return TdiItoX(TdiThreadStatic()->TdiRANGE_PTRS[2], out_ptr MDS_END_ARG);
-    status = TdiXtoI(TdiThreadStatic()->TdiRANGE_PTRS[2], TdiItoXSpecial, &limits MDS_END_ARG);
+      return TdiItoX(TdiThreadStatic_p->TdiRANGE_PTRS[2], out_ptr MDS_END_ARG);
+    status = TdiXtoI(TdiThreadStatic_p->TdiRANGE_PTRS[2], TdiItoXSpecial, &limits MDS_END_ARG);
     if STATUS_OK {
       dx0 = *limits.pointer;
       dx0.class = CLASS_S;
@@ -92,25 +117,25 @@ int Tdi1DtypeRange(int opcode, int narg, struct descriptor *list[], struct descr
 
       dat[0] = dat[1] = EMPTY_XD;
       if (new[0]) {
-	status = TdiXtoI(TdiThreadStatic()->TdiRANGE_PTRS[2], new[0], &dat[0] MDS_END_ARG);
+	status = TdiXtoI(TdiThreadStatic_p->TdiRANGE_PTRS[2], new[0], &dat[0] MDS_END_ARG);
 	range.begin = dat[0].pointer;
       }
     }
     if (new[1] && STATUS_OK) {
-      status = TdiXtoI(TdiThreadStatic()->TdiRANGE_PTRS[2], new[1], &dat[1] MDS_END_ARG);
+      status = TdiXtoI(TdiThreadStatic_p->TdiRANGE_PTRS[2], new[1], &dat[1] MDS_END_ARG);
       range.ending = dat[1].pointer;
     }
     if STATUS_OK
-      status = TdiItoX(TdiThreadStatic()->TdiRANGE_PTRS[2], &range, out_ptr MDS_END_ARG);
+      status = TdiItoX(TdiThreadStatic_p->TdiRANGE_PTRS[2], &range, out_ptr MDS_END_ARG);
     MdsFree1Dx(&dat[1], NULL);
     MdsFree1Dx(&dat[0], NULL);
     MdsFree1Dx(&limits, NULL);
     return status;
   }
   if (new[0] == 0)
-    new[0] = TdiThreadStatic()->TdiRANGE_PTRS[0];
+    new[0] = TdiThreadStatic_p->TdiRANGE_PTRS[0];
   if (new[1] == 0)
-    new[1] = TdiThreadStatic()->TdiRANGE_PTRS[1];
+    new[1] = TdiThreadStatic_p->TdiRANGE_PTRS[1];
   if (new[2] == 0)
     nnew = 2;
 

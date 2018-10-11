@@ -35,7 +35,6 @@ class ASCIIDataProvider implements DataProvider
         int    dimension;
         Properties x_prop = new Properties();
         Properties y_prop = new Properties();
-        public void setContinuousUpdate(boolean continuopusUpdate){}
         public SimpleWaveData(String in_y)
         {
             file_y = getPathValue(in_y);
@@ -127,14 +126,13 @@ class ASCIIDataProvider implements DataProvider
                     y = resizeBuffer(y, count );                  
                 }
             }
+            bufR.close();
             if( x == null || y == null )
                 throw(new Exception("No data in file or file syntax error"));
-            bufR.close();
         }
         
         private boolean setPropValues(String in, Properties prop)
         {
-            String str, p1, p2;
             boolean propertiesFile = false;
             
             try
@@ -249,7 +247,6 @@ class ASCIIDataProvider implements DataProvider
             StringTokenizer st = new StringTokenizer(val,",");
             int num = st.countTokens();
             float out[] = new float[num];
-            float d;
             String d_st;
             int i = 0;
             try
@@ -521,8 +518,6 @@ class ASCIIDataProvider implements DataProvider
         String n;
         byte buf[] = null;
         long size = 0;
-        long new_size;
-        String l[] = null;
         int i = frame_idx;
 
         String in , ext;
@@ -564,7 +559,6 @@ class ASCIIDataProvider implements DataProvider
     }
     public void enableAsyncUpdate(boolean enable){}
     public void getDataAsync(double lowerBound, double upperBound, double resolution){}
-    public void setContinuousUpdate(boolean continuousUpdate){}
     public static void main(String args[])
     {      
         ASCIIDataProvider p = new ASCIIDataProvider();

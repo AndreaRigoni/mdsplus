@@ -1,21 +1,11 @@
 package jScope;
 
-/* $Id$ */
-import jScope.WaveData;
-import jScope.SignalBox;
-import jScope.Signal;
-import jScope.MultiWaveform;
-import jScope.DataProvider;
-import jScope.Frames;
-import jScope.FrameData;
-import java.awt.*;
-import java.io.*;
-import java.awt.image.*;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.Vector;
 
 public class WaveInterface
 {
@@ -80,15 +70,12 @@ public class WaveInterface
     int     signal_select = -1;
     private Frames frames;
 
-    protected boolean is_async_update = false;
-
     static public boolean auto_color_on_expr = false;
 
     //True when a signal is added
     protected boolean add_signal = false;
     protected boolean is_signal_added = false;
 
-    boolean cache_enabled = false;
     static boolean brief_error = true;
 
     ColorMap colorMap = new ColorMap();
@@ -171,14 +158,6 @@ public class WaveInterface
     public void SetAsImage(boolean is_image)
     {
         this.is_image = is_image;
-    }
-
-    public void EnableCache(boolean state)
-    {
-    }
-
-    static public void FreeCache()
-    {
     }
 
     static void WriteLine(PrintWriter out, String prompt, String value)
@@ -638,7 +617,7 @@ public class WaveInterface
 
     public boolean UpdateShot(long curr_shots[]) throws IOException
     {
-        int l = 0, curr_num_shot;
+        int curr_num_shot;
 
         if (curr_shots == null)
         {
@@ -1082,10 +1061,7 @@ public class WaveInterface
 
     private void InitializeFrames()
     {
-        float f_time[];
-        int j = 0, i = 0;
         curr_error = null;
-        byte buf[];
         WaveformEvent we;
         int mode = this.wave.GetMode();
 
@@ -1386,10 +1362,7 @@ public class WaveInterface
             if(xwd.getNumDimension() == 1)
                 xwd = null; //xwd is different from null ONLY for bidimensional X axis 
         }
-        
-        
-        //wd.setContinuousUpdate(isContinuousUpdate);
-        boolean hasErrors = up_err != null || low_err != null;
+
         if( xDimension == 1)
         {
             if(xLimitsLong)

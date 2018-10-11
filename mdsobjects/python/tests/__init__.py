@@ -1,3 +1,28 @@
+#
+# Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+#
+# Redistributions in binary form must reproduce the above copyright notice, this
+# list of conditions and the following disclaimer in the documentation and/or
+# other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
 """
 MDSplus tests
 ==========
@@ -11,68 +36,36 @@ def _mimportSuite(name, level=1):
     except:
         return __import__(name, globals()).suite
 
-from unittest import TestCase,TestSuite,TextTestRunner
-import os,sys
+from unittest import TestSuite,TextTestRunner
+import sys
 import gc;gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
 
-from MDSplus import setenv,getenv
-if os.name=='nt':
-    setenv("PyLib","python%d%d"  % sys.version_info[0:2])
-else:
-    setenv("PyLib","python%d.%d" % sys.version_info[0:2])
-
-treeSuite=       _mimportSuite('treeUnitTest')
-threadsSuite=    _mimportSuite('threadsUnitTest')
-dataSuite=       _mimportSuite('dataUnitTest')
-exceptionSuite=  _mimportSuite('exceptionUnitTest')
-connectionsSuite=_mimportSuite('connectionUnitTest')
-segmentsSuite=   _mimportSuite('segmentsUnitTest')
-
-class cleanup(TestCase):
-    dir=None
-
-    def cleanup(self):
-        if cleanup.dir is not None:
-            dir=cleanup.dir
-            for i in os.walk(dir,False):
-                for f in i[2]:
-                    try:
-                      os.remove(i[0]+os.sep+f)
-                    except Exception:
-                      import sys
-                      e=sys.exc_info()[1]
-                      print( e)
-                for d in i[1]:
-                    try:
-                      os.rmdir(i[0]+os.sep+d)
-                    except Exception:
-                      import sys
-                      e=sys.exc_info()[1]
-                      print( e)
-            try:
-              os.rmdir(dir)
-            except Exception:
-              import sys
-              e=sys.exc_info()[1]
-              print( e)
-        return
-    def runTest(self):
-        self.cleanup()
+from MDSplus import getenv
 
 def test_all(*arg):
     if getenv('waitdbg') is not None:
       print("Hit return after gdb is connected\n")
       sys.stdin.readline()
-    tests=list()
-    tests.append(treeSuite())
-    if os.getenv('TEST_THREADS') is not None:
-        tests.append(threadsSuite())
-    tests.append(dataSuite())
-    tests.append(exceptionSuite())
-    tests.append(connectionsSuite())
-    tests.append(segmentsSuite())
-
+    testSuites = [
+        'dataUnitTest',
+        'dclUnitTest',
+        'devicesUnitTest',
+        'exceptionUnitTest',
+        'segmentsUnitTest',
+        'treeUnitTest',
+        'threadsUnitTest',
+    ]
+    #testSuites += ['connectionUnitTest']
+    tests=[]
+    for suite in testSuites:
+        try:
+            tests.append(_mimportSuite(suite)())
+        except Exception as e:
+            print("Could not import %s\n%s"%(suite,e.message))
     return TestSuite(tests)
 
+def run():
+    TextTestRunner(verbosity=2).run(test_all())
+
 if __name__=='__main__':
-    TextTestRunner().run(test_all())
+    run()

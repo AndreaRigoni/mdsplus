@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*      TdiGetArgs.C
         Fetches signal, data, and category of each input.
         Guesses input conversion and output category.
@@ -40,7 +64,7 @@ int TdiGetSignalUnitsData(struct descriptor *in_ptr,
   STATIC_CONSTANT unsigned char omitu[] = { DTYPE_WITH_UNITS, 0 };
   struct descriptor_xd tmp, *keep;
   INIT_STATUS;
-
+  GET_TDITHREADSTATIC_P;
   MdsFree1Dx(signal_ptr, NULL);
   status = TdiGetData(omitsu, in_ptr, data_ptr);
   if STATUS_OK
@@ -48,8 +72,8 @@ int TdiGetSignalUnitsData(struct descriptor *in_ptr,
     case DTYPE_SIGNAL:
       *signal_ptr = *data_ptr;
       *data_ptr = EMPTY_XD;
-      keep = TdiThreadStatic()->TdiSELF_PTR;
-      TdiThreadStatic()->TdiSELF_PTR = (struct descriptor_xd *)signal_ptr->pointer;
+      keep = TdiThreadStatic_p->TdiSELF_PTR;
+      TdiThreadStatic_p->TdiSELF_PTR = (struct descriptor_xd *)signal_ptr->pointer;
       status = TdiGetData(omitu, ((struct descriptor_signal *)signal_ptr->pointer)->data, data_ptr);
       if STATUS_OK
 	switch (data_ptr->pointer->dtype) {
@@ -67,7 +91,7 @@ int TdiGetSignalUnitsData(struct descriptor *in_ptr,
 	  MdsFree1Dx(units_ptr, NULL);
 	  break;
 	}
-      TdiThreadStatic()->TdiSELF_PTR = keep;
+      TdiThreadStatic_p->TdiSELF_PTR = keep;
       break;
     case DTYPE_WITH_UNITS:
       tmp = *data_ptr;
@@ -154,8 +178,8 @@ int TdiGetArgs(int opcode,
       if ((cptr->digits = TdiREF_CAT[jd].digits) == 0)
 	cptr->digits = dat_ptr->length;
     }
-
-  for (j = 0; j < narg; j++) {
+  if STATUS_OK
+   for (j = 0; j < narg; j++) {
     if (fun_ptr->i1 == fun_ptr->i2) {
       cats[j].out_dtype = fun_ptr->i2;
       cats[j].out_cat = i2;

@@ -1,4 +1,28 @@
 /*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+/*
   +----------------------------------------------------------------------+
   | PHP Version 4                                                        |
   +----------------------------------------------------------------------+
@@ -15,11 +39,11 @@
   | Author:                                                              |
   +----------------------------------------------------------------------+
 
-  $Id$ 
+  $Id$
 */
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#include "mdsplus/mdsconfig.h"
 #endif
 
 #include "php.h"
@@ -112,7 +136,7 @@ static char *mdsplus_translate_status(int socket, int status)
   struct descrip ans;
   int tmpstat;
   sprintf(expression, "getmsg(%d)", status);
-  tmpstat = MdsValue(socket, expression, &ans, 0);
+  tmpstat = MdsValue(socket, expression, &ans, NULL);
   if (tmpstat & 1 && ans.ptr)
     return (char *)ans.ptr;
   else {
@@ -409,7 +433,7 @@ PHP_FUNCTION(mdsplus_value)
   expression_len = (int)zexpression_len;
   mdsplus_replace_error(0, 1);
   if (num_args == 2)
-    status = MdsValue(socket, expression, &ans, 0);
+    status = MdsValue(socket, expression, &ans, NULL);
   else {
     int dims[7] = { 0, 0, 0, 0, 0, 0, 0 };
     if (zend_get_parameters_array_ex(num_args, args) != SUCCESS)
@@ -452,7 +476,7 @@ PHP_FUNCTION(mdsplus_value)
       void *dptr;
       void *mem = 0;
       status =
-	  GetAnswerInfoTS(socket, &ans.dtype, &len, &ans.ndims, &ans.dims, &numbytes, &dptr, &mem);
+		  GetAnswerInfoTS(socket, &ans.dtype, &len, &ans.ndims, &ans.dims, &numbytes, &dptr, &mem);
       ans.length = len;
       if (numbytes) {
 	if (ans.dtype == DTYPE_CSTRING) {
@@ -589,7 +613,7 @@ PHP_FUNCTION(mdsplus_put)
   expression_len = (int)zexpression_len;
   mdsplus_replace_error(0, 1);
   if (num_args == 3)
-    status = MdsPut(socket, node, expression, &ans, 0);
+    status = MdsPut(socket, node, expression, &ans, NULL);
   else {
     int dims[7] = { 0, 0, 0, 0, 0, 0, 0 };
     char putexp[512];
@@ -639,7 +663,7 @@ PHP_FUNCTION(mdsplus_put)
       void *dptr;
       void *mem = 0;
       status =
-	  GetAnswerInfoTS(socket, &ans.dtype, &len, &ans.ndims, &ans.dims, &numbytes, &dptr, &mem);
+		  GetAnswerInfoTS(socket, &ans.dtype, &len, &ans.ndims, &ans.dims, &numbytes, &dptr, &mem);
       ans.length = len;
       if (numbytes) {
 	if (ans.dtype == DTYPE_CSTRING) {

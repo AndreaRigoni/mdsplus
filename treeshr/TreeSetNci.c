@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*------------------------------------------------------------------------------
 
 		Name: TreeSetNci
@@ -34,12 +58,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
-#ifdef HAVE_PTHREAD_H
-#include <pthread.h>
 #endif
-#else
 #include <pthread.h>
-#endif
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -322,7 +342,13 @@ int TreeGetNciLw(TREE_INFO * info, int node_num, NCI * nci)
 	Description:
 
 +-----------------------------------------------------------------------------*/
-int TreeOpenNciW(TREE_INFO * info, int tmpfile)
+int TreeOpenNciW(TREE_INFO * info, int tmpfile){
+  WRLOCKINFO(info);
+  int status = _TreeOpenNciW(info,tmpfile);
+  UNLOCKINFO(info);
+  return status;
+}
+int _TreeOpenNciW(TREE_INFO * info, int tmpfile)
 {
   int status;
 
@@ -331,13 +357,18 @@ int TreeOpenNciW(TREE_INFO * info, int tmpfile)
     Allocate one
 *****************************************************/
 
-  if (info->nci_file == 0) {
+  if (!info->nci_file) {
     status =
 	((info->nci_file =
 	  (struct nci_file *)malloc(sizeof(NCI_FILE))) != NULL) ? TreeNORMAL : TreeFAILURE;
-    if (status & 1) {
+    if STATUS_OK {
       size_t len = strlen(info->filespec) - 4;
+#pragma GCC diagnostic push
+#if defined __GNUC__ && 800 <= __GNUC__ * 100 + __GNUC_MINOR__
+    _Pragma ("GCC diagnostic ignored \"-Wstringop-overflow\"")
+#endif
       char *filename = strncpy(malloc(len + 20), info->filespec, len);
+#pragma GCC diagnostic pop
       filename[len] = '\0';
       strcat(filename, tmpfile ? "characteristics#" : "characteristics");
       memset(info->nci_file, 0, sizeof(NCI_FILE));
@@ -360,7 +391,12 @@ int TreeOpenNciW(TREE_INFO * info, int tmpfile)
     open it for write access.
   *******************************************/
     size_t len = strlen(info->filespec) - 4;
+#pragma GCC diagnostic push
+#if defined __GNUC__ && 800 <= __GNUC__ * 100 + __GNUC_MINOR__
+    _Pragma ("GCC diagnostic ignored \"-Wstringop-overflow\"")
+#endif
     char *filename = strncpy(malloc(len + 20), info->filespec, len);
+#pragma GCC diagnostic pop
     filename[len] = '\0';
     strcat(filename, tmpfile ? "characteristics#" : "characteristics");
     /********* this will never happen ***********/
@@ -377,7 +413,7 @@ int TreeOpenNciW(TREE_INFO * info, int tmpfile)
     if (info->edit) {
       info->edit->first_in_mem = (int)MDS_IO_LSEEK(info->nci_file->put, 0, SEEK_END) / 42;
     }
-  } 
+  }
   if (status & 1)
     TreeCallHook(OpenNCIFileWrite, info, 0);
   return status;
@@ -690,19 +726,8 @@ static int SetNodeParentState(PINO_DATABASE * db, NODE * node, NCI * nci, unsign
   return status;
 }
 
-#if defined _WIN32 && !defined HAVE_PTHREAD_H
-#define pthread_mutex_t int
-static void LockMdsShrMutex()
-{
-}
-
-static void UnlockMdsShrMutex()
-{
-}
-#else
 extern void LockMdsShrMutex(pthread_mutex_t *, int *);
 extern void UnlockMdsShrMutex(pthread_mutex_t *);
-#endif
 
 STATIC_THREADSAFE pthread_mutex_t NCIMutex;
 STATIC_THREADSAFE int NCIMutex_initialized;

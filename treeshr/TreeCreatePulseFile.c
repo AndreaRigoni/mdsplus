@@ -1,3 +1,27 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*------------------------------------------------------------------------------
 
 		Name:   TreeCreatePulseFile
@@ -64,8 +88,7 @@ int TreeCreatePulseFile(int shotid, int numnids_in, int *nids_in)
 int _TreeCreatePulseFile(void *dbid, int shotid, int numnids_in, int *nids_in)
 {
   PINO_DATABASE *dblist = (PINO_DATABASE *) dbid;
-  int status = 1;
-  int retstatus;
+  INIT_STATUS, retstatus = MDSplusERROR;
   int num;
   int nids[256];
   int i;
@@ -82,11 +105,13 @@ int _TreeCreatePulseFile(void *dbid, int shotid, int numnids_in, int *nids_in)
   if (numnids_in == 0) {
     void *ctx = 0;
     nids[0] = 0;
-    for (num = 1;
+    for (num = 0; num < 256 && _TreeFindTagWild(dbid, "TOP", &nids[num], &ctx); num++);
+    /* for (num = 1;
 	 num < 256
 	 && (_TreeFindNodeWild(dbid, "***", &nids[num], &ctx, (1 << TreeUSAGE_SUBTREE)) & 1);
 	 num++) ;
     TreeFindNodeEnd(&ctx);
+    */
   } else {
     num = 0;
     for (i = 0; i < numnids_in; i++) {
@@ -105,7 +130,7 @@ int _TreeCreatePulseFile(void *dbid, int shotid, int numnids_in, int *nids_in)
     shot = TreeGetCurrentShotId(dblist->experiment);
 
   retstatus = status;
-  if (status & 1) {
+  if STATUS_OK {
     for (i = 0; i < num && (retstatus & 1); i++) {
       int skip = 0;
       char name[13];
@@ -126,9 +151,9 @@ int _TreeCreatePulseFile(void *dbid, int shotid, int numnids_in, int *nids_in)
       } else {
 	strcpy(name, dblist->experiment);
       }
-      if (status & 1 && !(skip))
+      if (STATUS_OK && !(skip))
 	status = TreeCreateTreeFiles(name, shot, source_shot);
-      if (!(status & 1) && (i == 0))
+      if (STATUS_NOT_OK && (i == 0))
 	retstatus = status;
     }
   }
@@ -137,6 +162,7 @@ int _TreeCreatePulseFile(void *dbid, int shotid, int numnids_in, int *nids_in)
 
 int TreeCreateTreeFiles(char *tree, int shot, int source_shot)
 {
+  INIT_STATUS;
   size_t len = strlen(tree);
   char tree_lower[13];
   char pathname[32];
@@ -145,18 +171,17 @@ int TreeCreateTreeFiles(char *tree, int shot, int source_shot)
   size_t pathlen;
   char name[32];
   size_t i;
-  int status = 1;
   int itype;
   char *types[] = { ".tree", ".characteristics", ".datafile" };
   for (i = 0; i < len && i < 12; i++)
-    tree_lower[i] = tolower(tree[i]);
+    tree_lower[i] = (char)tolower(tree[i]);
   tree_lower[i] = 0;
   strcpy(pathname, tree_lower);
   strcat(pathname, TREE_PATH_SUFFIX);
   pathin = TranslateLogical(pathname);
   if (pathin) {
     pathlen = strlen(pathin);
-    for (itype = 0; itype < 3 && (status & 1); itype++) {
+    for (itype = 0; itype < 3 && STATUS_OK; itype++) {
       char *srcfile = 0;
       char *dstfile = 0;
       char *type = types[itype];
@@ -263,8 +288,7 @@ int TreeCreateTreeFiles(char *tree, int shot, int source_shot)
 
 STATIC_ROUTINE int _CopyFile(char *src, char *dst, int lock_it)
 {
-  int status;
-
+  INIT_STATUS_ERROR;
   int src_fd = MDS_IO_OPEN(src, O_RDONLY | O_BINARY | O_RANDOM, 0);
   if (src_fd != -1) {
     ssize_t src_len = MDS_IO_LSEEK(src_fd, 0, SEEK_END);
@@ -272,7 +296,7 @@ STATIC_ROUTINE int _CopyFile(char *src, char *dst, int lock_it)
     if ((dst_fd != -1) && (src_len != -1)) {
       MDS_IO_LSEEK(src_fd, 0, SEEK_SET);
       if (lock_it)
-	MDS_IO_LOCK(src_fd, 0, (int)src_len, MDS_IO_LOCK_RD, 0);
+	MDS_IO_LOCK(src_fd, 0, (size_t)src_len, MDS_IO_LOCK_RD, 0);
       if (src_len > 0) {
 	size_t chunk_size = (size_t) (MIN(MAX_CHUNK, src_len));
 	void *buff = malloc(chunk_size);
@@ -294,7 +318,7 @@ STATIC_ROUTINE int _CopyFile(char *src, char *dst, int lock_it)
       } else
 	status = TreeSUCCESS;
       if (lock_it)
-	MDS_IO_LOCK(src_fd, 0, (int)src_len, MDS_IO_LOCK_NONE, 0);
+	MDS_IO_LOCK(src_fd, 0, (size_t)src_len, MDS_IO_LOCK_NONE, 0);
       MDS_IO_CLOSE(dst_fd);
     } else
       status = TreeFCREATE;

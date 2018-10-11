@@ -7,9 +7,10 @@
 # Build script from within a docker image
 #
 export HOME=/tmp/home
+srcdir=$(readlink -f $(dirname ${0})/../..)
 mkdir -p $HOME
 tio(){
-    :&& /source/deploy/platform/timeout.sh "$@";
+    :&& ${srcdir}/deploy/platform/timeout.sh "$@";
     return $?;
 }
 getenv() {
@@ -18,28 +19,36 @@ getenv() {
 runtests() {
     # run tests with the platform specific params read from test32 and test64
     testarch ${test64};
-    testarch ${test32};
-    if [ -z "$NOMAKE" ]; then
-        echo "TEST RESULTS:"
-        checktests;
-        GREEN $COLOR
-        echo "SUCCESS"
-        NORMAL $COLOR
+    if [ -f /usr/bin/python-i686 ]
+    then
+      PYTHON=/usr/bin/python-i686 testarch ${test32};
+    else
+      testarch ${test32};
     fi
+    checktests;
 }
 testarch(){
+    archlist="${archlist} $1"
+    echo archlist=${archlist}
     sanitize   $@;
     normaltest $@;
 }
 config() {
-    :&& /source/configure \
+    if [ -z "$JARS_DIR" ]
+    then
+	JAVA_OPTS="--with-java_target=6 --with-java_bootclasspath=${srcdir}/rt.jar"
+    else
+	JAVA_OPTS="--with-jars=${JARS_DIR}"
+    fi
+    :&& ${srcdir}/configure \
         --prefix=${MDSPLUS_DIR} \
         --exec_prefix=${MDSPLUS_DIR} \
         --host=$2 \
         --bindir=${MDSPLUS_DIR}/$3 \
         --libdir=${MDSPLUS_DIR}/$4 \
-        --with-java_target=6 \
-        --with-java_bootclasspath=/source/rt.jar \
+        ${CONFIGURE_PARAMS} \
+        ${JAVA_OPTS} \
+	--enable-werror \
         $5 $6 $7 $8 $9;
     status=$?
 }
@@ -48,10 +57,10 @@ config_test(){
     export WINEPATH="Z:${MDSPLUS_DIR}/$3"
     rm -Rf $(dirname "${MDSPLUS_DIR}");
     mkdir -p ${MDSPLUS_DIR};
-    cp -rf /source/xml ${MDSPLUS_DIR}/xml;
+    cp -rf ${srcdir}/xml ${MDSPLUS_DIR}/xml;
     MDS_PATH=${MDSPLUS_DIR}/tdi;
     pushd ${MDSPLUS_DIR}/..;
-    config $@ --enable-debug --enable-werror;
+    config $@ --enable-debug;
 }
 checkstatus(){
 # checkstatus flagname "error message" $?
@@ -79,38 +88,52 @@ EOF
             fi
         fi
 }
-checktests() {
+
+checktestarch() {
     set +e
     ### Check status of all tests. If errors found print error messages and then exit with failure
-    checkstatus failed "Failure: 64-bit test suite failed." $tests_64
-    checkstatus failed "Failure: 64-bit valgrind test suite failed." $tests_64_val
+    checkstatus failed "Failure: ${1}-bit make failed."                $(getenv    "make_${1}")
+    checkstatus failed "Failure: ${1}-bit install failed."             $(getenv "install_${1}")
+    checkstatus failed "Failure: ${1}-bit test suite failed."          $(getenv   "tests_${1}")
+    checkstatus failed "Failure: ${1}-bit valgrind test suite failed." $(getenv   "tests_${1}_val")
     for test in address thread undefined; do
-        checkstatus failed "Failure: 64-bit santize with ${test} failed." $(getenv "tests_64_san_${test}")
+        checkstatus failed "Failure: ${1}-bit santize with ${test} make failed."    $(getenv "make_${1}_san_${test}")
+        checkstatus failed "Failure: ${1}-bit santize with ${test} install failed." $(getenv "install_${1}_san_${test}")
+        checkstatus failed "Failure: ${1}-bit santize with ${test} tests failed."   $(getenv "tests_${1}_san_${test}")
     done;
-    checkstatus failed "Failure: 32-bit test suite failed." $tests_32
-    checkstatus failed "Failure: 32-bit valgrind test suite failed." $tests_32_val
-    for test in address thread undefined; do
-        checkstatus failed "Failure: 32-bit santize with ${test} failed." $(getenv "tests_32_san_${test}")
-    done;
-    checkstatus abort "Failure: One or more tests have failed (see above)." $failed
 }
+
+checktests() {
+    if [ -z "$NOMAKE" ]; then
+        echo "TEST RESULTS:"
+        for arch in ${archlist};do
+            checktestarch $arch
+        done
+        checkstatus abort "Failure: One or more tests have failed (see above)." $failed
+        GREEN $COLOR
+        echo "SUCCESS"
+        NORMAL $COLOR
+    fi
+}
+
 sanitize() {
     ### Build with sanitizers and run tests with each sanitizer
-    SANITIZE="$(spacedelim $SANITIZE)"
     if [ ! -z "$SANITIZE" ]
     then
         for test in ${SANITIZE}; do
             echo Doing sanitize ${test}
             MDSPLUS_DIR=/workspace/tests/${1}-san-${test}/buildroot;
-            config_test $@ --enable-sanitize=${test}
+            config_test $@ --enable-sanitize=${test} --disable-java
             if [ "$status" = "111" ]; then
                 echo "Sanitizer ${test} not supported. Skipping."
             elif [ "$status" = "0" ]; then
               if [ -z "$NOMAKE" ]; then
                 $MAKE
+                checkstatus abort "Failure compiling $1-bit with sanitize-${test}." $?
                 $MAKE install
+                checkstatus abort "Failure installing $1-bit with sanitize-${test}." $?
                 :&& tio 1800 $MAKE -k tests 2>&1
-                checkstatus tests_${1}_san_${test} "Failure doing $1-bit sanitize test ${test}." $?
+                checkstatus tests_${1}_san_${test} "Failure testing $1-bit with sanitize-${test}." $?
               fi
             else
                 echo "configure returned status $?"
@@ -120,43 +143,44 @@ sanitize() {
         done
     fi
 }
+make_jars() {
+  rm -Rf /workspace/jars
+  mkdir -p /workspace/jars
+  pushd /workspace/jars
+  ${srcdir}/configure --enable-java_only --with-java_target=6 --with-java_bootclasspath=${srcdir}/rt.jar
+  if [ -z "$NOMAKE" ]; then
+    $MAKE
+  fi
+  popd
+}
+
 normaltest() {
     gettimeout() {
         declare -i n=1800*$#
         echo $n
     }
     ### Build with debug to run regular and valgrind tests
-    VALGRIND_TOOLS="$(spacedelim $VALGRIND_TOOLS)"
     MDSPLUS_DIR=/workspace/tests/$1/buildroot;
     config_test $@
-   if [ -z "$NOMAKE" ]; then
+    if [ -z "$NOMAKE" ]; then
     $MAKE
+    checkstatus abort "Failure compiling $1-bit." $?
     $MAKE install
+    checkstatus abort "Failure installing $1-bit." $?
     ### Run standard tests
     :&& tio 600 $MAKE -k tests 2>&1
-    checkstatus tests_$1 "Failure doing $1-bit normal tests." $?
+    checkstatus tests_$1 "Failure testing $1-bit." $?
     if [ ! -z "$VALGRIND_TOOLS" ]
     then
         ### Test with valgrind
         to=$( gettimeout $VALGRIND_TOOLS )
-        :&& tio $to  $MAKE -k tests-valgrind 2>&1
-        checkstatus tests_${1}_val "Failure doing $1-bit valgrind tests." $?
+		:&& tio $to  $MAKE -k rebuild-tests VALGRIND_BUILD=yes 2>&1
+		checkstatus tests_${1}_val "Failure building tests $1-bit with valgrind." $?
+		:&& tio $to  $MAKE -k tests-valgrind 2>&1
+        checkstatus tests_${1}_val "Failure testing $1-bit with valgrind." $?
     fi
    fi
     popd
-}
-spacedelim() {
-    if [ ! -z "$1" ]
-    then
-        if [ "$1" = "skip" ]
-        then
-            ans=""
-        else
-            IFS=',' read -ra ARR <<< "$1"
-            ans="${ARR[*]}"
-        fi
-    fi
-    echo $ans
 }
 RED() {
     if [ "$1" = "yes" ]
@@ -177,37 +201,42 @@ NORMAL() {
     fi
 }
 export PYTHONDONTWRITEBYTECODE=no
-export PyLib=$(python -V | awk '{print $2}' | awk -F. '{print "python"$1"."$2}') 
+export PyLib=$(ldd $(which python) | grep libpython | awk '{print $3}')
 main(){
-    MAKE=${MAKE:="env LANG=en_US.UTF-8 make"}
-    if [ -r /source/deploy/os/${OS}.env ]
+    MAKE=${MAKE:="make"}
+    if [ -r ${srcdir}/deploy/os/${OS}.env ]
     then
-        source /source/deploy/os/${OS}.env
+        source ${srcdir}/deploy/os/${OS}.env
     fi
     if [ "$TEST" = "yes" ]
     then
         set +e
         runtests
     fi
-    if [ "${BRANCH}" = "stable" ]
+    if [ "$MAKE_JARS" = "yes" ]
     then
-        BNAME=""
-    else
-        BNAME="-$(echo ${BRANCH} | sed -e 's/-/_/g')"
+      set +e
+      make_jars
     fi
+    case "$BRANCH" in
+     stable) export BNAME="";;
+      alpha) export BNAME="-alpha";;
+          *) export BNAME="-other";;
+    esac
     if [ "$RELEASE" = "yes" ]
     then
         set +e
         buildrelease
     fi
-    if [ "$PUBLISH" = "yes" ]
+    if [ -z "$NOMAKE" ] && [ "$PUBLISH" = "yes" ]
     then
         set +e
         publish
     fi
 }
-source /source/deploy/platform/${PLATFORM}/${PLATFORM}_docker_build.sh
+source ${srcdir}/deploy/platform/${PLATFORM}/${PLATFORM}_docker_build.sh
 if [ ! -z "$0" ] && [ ${0:0:1} != "-" ] && [ "$( basename $0 )" = "platform_docker_build.sh" ]
 then
+    env
     main
 fi

@@ -138,8 +138,6 @@ public class XYWaveData implements WaveData
             System.out.println("INTERNAL ERROR: WRONG DIMENSIONS FOR 2D SIGNAL");
         isLong = true;
     }
-    public void setContinuousUpdate(boolean continuopusUpdate){}
-
     /*
      * Read data within specified interval. either Xmin or xmax cna specify no limit (-Float.MAX_VALUE, Float.MAX_VALUE)
      */
@@ -179,21 +177,16 @@ public class XYWaveData implements WaveData
         
         //OK, trovato l'intervallo tra minIdx e maxIdx
         double delta = (xmax - xmin)/numPoints;
-        double retResolution;
         boolean showMinMax = false;
         int actPoints;
         //Forces resampling only if there is a significant numebr of points
-        if((maxIdx - minIdx) > 1000 &&  delta > 4 * (maxIdx - minIdx + 1)/(xmax - xmin)) //If at least there are four times  real points
-        {
+        if((maxIdx - minIdx) > 1000 &&  delta > 4 * (maxIdx - minIdx + 1)/(xmax - xmin)) {
+        	//If at least there are four times  real points
             actPoints = 2 * (int)((xmax - xmin)/delta + 0.5);
             showMinMax = true;
-            retResolution = 1./delta;
-        }
-        else
-        {
-           actPoints = maxIdx - minIdx + 1; //No resampling at all
-           showMinMax = false;
-           retResolution = Double.MAX_VALUE;  //Maximum resolution
+        } else {
+        	actPoints = maxIdx - minIdx + 1; //No resampling at all
+        	showMinMax = false;
         }
           
         float retY[] = new float[actPoints];
@@ -223,7 +216,6 @@ public class XYWaveData implements WaveData
                retY[2*i] = currMin;
                retY[2*i+1] = currMax;
             }
-            startLiveUpdate();
             if(isLong)
                 return new XYData(retXLong, retY, actPoints/(xmax - xmin), true);
             else
@@ -238,8 +230,7 @@ public class XYWaveData implements WaveData
                 if(isLong)
                     retXLong[i] = xLong[minIdx + i];
             }
-            startLiveUpdate();
-            if(isLong)
+             if(isLong)
                 return new XYData(retXLong, retY, Double.MAX_VALUE, true);
             else
                 return new XYData(retX, retY, Double.MAX_VALUE, true);
@@ -400,33 +391,4 @@ public class XYWaveData implements WaveData
        }
     }
 
-       //Inner class LiveUpdater just for test
-    class LiveUpdater extends Thread
-    {
-       public void run()
-       {
-           //if(true) return; //REMOVE THIS FOR LIVE UPDATE
-           double []newX = new double[1];
-           float []newY = new float[1];
-           for(int i = 0; i < x.length; i++)
-           {
-                try {
-                    Thread.sleep(100);
-                }catch(InterruptedException exc){}
-                
-                newX[0] = x[x.length - 1] + i + 1;
-                newY[0] = y[x.length - 1 - i];
-                fireListeners(newX, newY, Double.MAX_VALUE);
-            }
-        }
-    }
-    
-    void startLiveUpdate()
-    {
-        if(!liveUpdateStarted)
-        {
-            liveUpdateStarted = true;
-            (new LiveUpdater()).start();
-        }
-    }
 }

@@ -8,24 +8,6 @@ DOCS = jScope.html jScope.jpg popup.jpg about_jscope.jpg \
 	UpdateEvent.html UpdateEventListener.html \
 	WaveData.html WaveDisplay.html
 
-TOPDOCS = jScope.html \
-	CompositeWaveDisplay.html \
-	ConnectionEvent.html ConnectionListener.html \
-	DataProvider.html \
-	FrameData.html \
-	ReadMe.html \
-	TWU_image_message.html \
-	UpdateEvent.html UpdateEventListener.html \
-	WaveData.html WaveDisplay.html
-
-SUBDOCS = jScope.html jScope.jpg popup.jpg \
-	CompositeWaveDisplay.html \
-	ConnectionEvent.html ConnectionListener.html \
-	DataProvider.html \
-	FrameData.html \
-	data_setup.jpg frame_popup.jpg image_setup.jpg \
-	UpdateEvent.html UpdateEventListener.html \
-	WaveData.html
 
 COMMON_SRC = \
 	jScope/AboutWindow.java               jScope/ASCIIDataProvider.java       jScope/AsdexDataProvider.java     \
@@ -33,7 +15,7 @@ COMMON_SRC = \
 	jScope/Base64.java                    jScope/ColorDialog.java             jScope/ColorMapDialog.java        \
 	jScope/ColorMap.java                  jScope/ConnectionEvent.java         jScope/ConnectionListener.java    \
 	jScope/ContourSignal.java             jScope/DataAccess.java              jScope/DataAccessURL.java         \
-	jScope/DataCached.java                jScope/DataCacheObject.java         jScope/DataProvider.java          \
+	jScope/DataProvider.java                                                                                    \
 	jScope/DataServerItem.java            jScope/Descriptor.java              jScope/FakeTWUProperties.java     \
 	jScope/FontSelection.java             jScope/FrameData.java               jScope/Frames.java                \
 	jScope/FtuDataProvider.java           jScope/Grid.java                    jScope/ImageTransferable.java     \
@@ -63,7 +45,8 @@ COMMON_SRC = \
 	jScope/WaveformEditor.java            jScope/WaveformEditorListener.java  jScope/WaveformEvent.java         \
 	jScope/Waveform.java                  jScope/WaveformListener.java        jScope/WaveformManager.java       \
 	jScope/WaveformMetrics.java           jScope/WaveInterface.java           jScope/WavePopup.java             \
-        jScope/XYData.java		      jScope/XYWaveData.java		  jScope/WaveDataListener.java
+        jScope/XYData.java		      jScope/XYWaveData.java		  jScope/WaveDataListener.java	    \
+	jScope/MdsConnectionLocal.java	      jScope/MdsConnectionSSH.java	  jScope/SSHDataProvider.java 
 
 WAVEDISPLAY_SRC = 
 
@@ -72,7 +55,6 @@ JSCOPE_SRC = \
 	jScope/CompositeWaveDisplay.java \
 	jScope/LocalDataProvider.java    \
 	jScope/LocalDataProviderInfo.java    \
-	jScope/MdsDataClient.java        \
 	jScope/MdsIOException.java       \
 	jScope/MdsPlusBrowseSignals.java \
 	jScope/TextorBrowseSignals.java

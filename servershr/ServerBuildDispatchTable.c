@@ -1,6 +1,30 @@
+/*
+Copyright (c) 2017, Massachusetts Institute of Technology All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 /*------------------------------------------------------------------------------
 
-		Name:   ServerBuildDispatchTable   
+		Name:   ServerBuildDispatchTable
 
 		Type:   C function
 
@@ -8,11 +32,11 @@
 
 		Date:   17-APR-1992
 
-    		Purpose: Build dispatch table 
+    		Purpose: Build dispatch table
 
 ------------------------------------------------------------------------------
 
-	Call sequence: 
+	Call sequence:
 
 int ServerBuildDispatchTable( )
 
@@ -54,17 +78,18 @@ static ActionInfo *actions;
 
 static int CompareActions(ActionInfo * a, ActionInfo * b)
 {
-  return a->on == b->on ? (a->phase ==
-			   b->phase ? a->sequence - b->sequence : a->phase - b->phase) : b->on -
-      a->on;
+  return a->on==b->on
+       ? (a->phase==b->phase
+         ? a->sequence - b->sequence
+         : a->phase - b->phase
+       ): b->on - a->on;
 }
 
 #define MAX_ACTIONS 10000
 
-static int AddReference(int idx, int *nid)
+static int ifAddReference(int idx, int *nid)
 {
-  int i;
-  int j;
+  int i, j;
   for (i = 0; i < num_actions; i++) {
     if (actions[i].nid == *nid) {
       if (actions[i].num_references == 0)
@@ -72,29 +97,29 @@ static int AddReference(int idx, int *nid)
       else {
 	for (j = 0; j < actions[i].num_references; j++)
 	  if (actions[i].referenced_by[j] == idx)
-	    return 1;
+	    return B_TRUE;
 	actions[i].referenced_by =
 	    (int *)realloc((char *)actions[i].referenced_by,
 			   sizeof(int) * (actions[i].num_references + 1));
       }
       actions[i].referenced_by[actions[i].num_references] = idx;
       actions[i].num_references++;
-      return 1;
+      return B_TRUE;
     }
   }
-  return 0;
+  return B_FALSE;
 }
 
 static int fixup_nid(int *nid, int idx, struct descriptor_d *path_out)
 {
+  INIT_STATUS;
   static DESCRIPTOR(dtype_str, "DTYPE");
   static int dtype;
   static DESCRIPTOR_LONG(dtype_dsc, &dtype);
   DESCRIPTOR_NID(niddsc, 0);
-  int status;
   niddsc.pointer = (char *)nid;
   status = TdiGetNci(&niddsc, &dtype_str, &dtype_dsc MDS_END_ARG);
-  if (status & 1 && dtype == DTYPE_ACTION && AddReference(idx, nid)) {
+  if (STATUS_OK && dtype == DTYPE_ACTION && ifAddReference(idx, nid)) {
     char ident[64];
     char tmp[64];
     struct descriptor ident_dsc = { 0, DTYPE_T, CLASS_S, 0 };
@@ -110,28 +135,28 @@ static int fixup_nid(int *nid, int idx, struct descriptor_d *path_out)
     ident_dsc.length = strlen(ident);
     TdiExecute(&ident_dsc, &xd MDS_END_ARG);
     MdsFree1Dx(&xd, NULL);
-    return 1;
+    return B_TRUE;
   }
-  return 0;
+  return B_FALSE;
 }
 
 static int fixup_path(struct descriptor *path_in, int idx, struct descriptor_d *path_out)
 {
   char *path = strncpy((char *)malloc(path_in->length + 1), path_in->pointer, path_in->length);
   int nid;
-  int status = 0;
+  int flag = B_FALSE;
   path[path_in->length] = 0;
-  if (TreeFindNode(path, &nid) & 1)
-    status = fixup_nid(&nid, idx, path_out);
+  if IS_OK(TreeFindNode(path, &nid))
+    flag = fixup_nid(&nid, idx, path_out);
   free(path);
-  return status;
+  return flag;
 }
 
 static int make_idents(struct descriptor *path_in, int idx __attribute__ ((unused)), struct descriptor *path_out __attribute__ ((unused)))
 {
   if (path_in && path_in->pointer && path_in->pointer[0] == '_')
     path_in->dtype = DTYPE_IDENT;
-  return 0;
+  return B_FALSE;
 }
 
 static void LinkConditions()
@@ -140,14 +165,11 @@ static void LinkConditions()
   for (i = 0; i < num_actions; i++) {
     if (actions[i].condition) {
       EMPTYXD(xd);
-      MdsCopyDxXdZ(actions[i].condition, &xd, 0, fixup_nid, i + (char *)0, fixup_path,
-		   i + (char *)0);
-      MdsCopyDxXdZ((struct descriptor *)&xd, (struct descriptor_xd *)actions[i].condition, 0, 0, 0,
-		   make_idents, i + (char *)0);
+      MdsCopyDxXdZ(actions[i].condition, &xd, 0, fixup_nid, i + (char *)0, fixup_path, i + (char *)0);
+      MdsCopyDxXdZ((struct descriptor *)&xd, (struct descriptor_xd *)actions[i].condition, 0, 0, 0, make_idents, i + (char *)0);
       MdsFree1Dx(&xd, 0);
     }
   }
-  return;
 }
 
 EXPORT int ServerBuildDispatchTable(char *wildcard, char *monitor_name, void **table)
@@ -164,13 +186,12 @@ EXPORT int ServerBuildDispatchTable(char *wildcard, char *monitor_name, void **t
   int *nids;
   int *nidptr;
   char tree[12];
-  int shot;
+  int shot = -1;
   char *cptr;
-  static DBI_ITM itmlst[] = { {sizeof(tree), DbiNAME, 0, 0}
-  ,
-  {sizeof(shot), DbiSHOTID, 0, 0}
-  ,
-  {0, 0, 0, 0}
+  static DBI_ITM itmlst[] = {
+    {sizeof(tree), DbiNAME, 0, 0},
+    {sizeof(shot), DbiSHOTID, 0, 0},
+    {0, 0, 0, 0}
   };
   itmlst[0].pointer = &tree;
   itmlst[1].pointer = &shot;
@@ -195,8 +216,7 @@ EXPORT int ServerBuildDispatchTable(char *wildcard, char *monitor_name, void **t
   if (num_actions) {
     static int zero = 0;
     int table_size = sizeof(DispatchTable) + (num_actions - 1) * sizeof(ActionInfo);
-    *table_ptr = (DispatchTable *) malloc(table_size);
-    memset(*table_ptr, 0, table_size);
+    *table_ptr = (DispatchTable *) calloc(1,table_size);
     actions = (*table_ptr)->actions;
     (*table_ptr)->shot = shot;
     strcpy((*table_ptr)->tree, tree);

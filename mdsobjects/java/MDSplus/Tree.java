@@ -38,7 +38,21 @@ static public final int  TreeUSAGE_ANY  = 0,
   
         static {
             try {
-              System.loadLibrary("JavaMds");
+              int loaded = 0;
+              try {
+                java.lang.String value = System.getenv("JavaMdsLib");
+                if (value == null) {
+                  value = System.getProperty("JavaMdsLib");
+                }
+                if (value != null) {
+                  System.load(value);
+                  loaded = 1;
+                }
+              } catch (Throwable e) {
+              }
+              if (loaded == 0) {
+                System.loadLibrary("JavaMds");
+              }
 	    }catch(Throwable e)
             {
                   System.out.println("Error loading library javamds: "+e);
@@ -87,7 +101,15 @@ static public final int  TreeUSAGE_ANY  = 0,
             open = false;
         }
 
-        
+        protected void finalize() throws Throwable {
+            try{
+                if (this.isOpen())
+                    this.close();
+            }finally{
+                super.finalize();
+            }
+        }
+
         public boolean isOpen() { return open;}
         public java.lang.String toString()
         {

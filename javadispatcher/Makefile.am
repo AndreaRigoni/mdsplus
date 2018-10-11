@@ -6,6 +6,16 @@ JTRAVERSERJAR = $(top_builddir)/javatraverser/jTraverser.jar
 CLASSPATH_ENV = CLASSPATH=$(JSCOPEJAR):$(JTRAVERSERJAR)
 
 javadir = $(exec_prefix)/java/classes
+java_DATA = jDispatcher.jar
+dist_java_DATA = jDispatcher.properties
+
+if USE_JARS_DIR
+
+jDispatcher.jar : @JARS_DIR@/javadispatcher/jDispatcher.jar
+	cp $< $@
+
+else
+
 java_JAVA = Action.java
 java_JAVA += ActionServer.java
 java_JAVA += Balancer.java
@@ -34,12 +44,11 @@ java_JAVA += ServerListener.java
 java_JAVA += ServerShowDialog.java
 java_JAVA += ServersInfoPanel.java
 
-dist_java_DATA = jDispatcher.properties
-java_DATA = jDispatcher.jar
 jDispatcher.jar: classjava.stamp
-	$(JAR) c0f $@ $(CLASSES)
+	@ echo "Creating JAR: $@ ..."; \
+	  $(JAR) c0f $@ $(CLASSES)
 
-CLEANFILES = $(CLASSES) jDispatcher.jar
+endif
 
 if MINGW 
 bin_SCRIPTS = jDispatcherIp.bat jDispatchMonitor.bat jServer.bat
@@ -47,6 +56,8 @@ else
 bin_SCRIPTS = jDispatcherIp jDispatchMonitor jServer
 EXTRA_DIST = jDispatcherIp.template jDispatchMonitor.template jServer.template
 endif
+
+CLEANFILES = $(CLASSES) jDispatcher.jar $(bin_SCRIPTS)
 
 jDispatcherIp jDispatchMonitor jServer: %: %.template
 	cp $^ $@

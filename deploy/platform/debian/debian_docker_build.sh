@@ -2,7 +2,7 @@
 #
 # debian_docker_build is used to build, test, package and add deb's to a
 # repository for debian based systems.
-# 
+#
 # release:
 # /release/repo   -> repository
 # /release/$branch/DEBS/$arch/*.deb
@@ -11,33 +11,42 @@
 # /publish/repo   -> repository
 # /publish/$branch/DEBS/$arch/*.deb
 #
-test64="64 x86_64-linux bin lib --with-gsi=/usr:gcc64"
-test32="32 i686-linux   bin lib --with-gsi=/usr:gcc32"
-if [ "$ARCH" = "amd64" ]
+
+srcdir=$(readlink -e $(dirname ${0})/../..)
+
+# configure based on ARCH
+case "${ARCH}" in
+  "amd64")
+    host=x86_64-linux
+    gsi_param="--with-gsi=/usr:gcc64"
+    bits=64
+    ;;
+  "armhf")
+    host=arm-linux-gnueabihf
+    gsi_param="--with-gsi=/usr:gcc32"
+    bits=32
+    ;;
+  *)
+    host=i686-linux
+    gsi_param="--with-gsi=/usr:gcc32"
+    bits=32
+    ;;
+esac
+
+if [[ "$OS" == "debian_wheezy" ]]
 then
-    if [ -z "$host" ]
-    then
-	host=x86_64-linux
-    fi
-else
-    if [ -z "$host" ]
-    then
-	host=i686-linux
-    fi
+  export JDK_DIR=/usr/lib/jvm/java-7-openjdk-${ARCH}
 fi
+config_param="${bits} ${host} bin lib ${gsi_param}"
 runtests() {
-  if [ "${ARCH}" = "amd64" ]
-  then
-      testarch ${test64}
-  else
-      testarch ${test32}
-  fi
+  testarch ${config_param}
   checktests
 }
 makelist(){
     dpkg -c $1 | \
     grep -v python/dist | \
     grep -v python/build | \
+    grep -v python/doc | \
     grep -v egg-info | \
     grep -v '/$' | \
     awk '{for (i=6; i<NF; i++) printf $i " "; print $NF}' | \
@@ -60,33 +69,24 @@ buildrelease() {
     set -e
     mkdir -p /release/${BRANCH}/DEBS/${ARCH}
     rm -Rf /workspace/releasebld/* /release/${BRANCH}/DEBS/${ARCH}/*
-    if [ "${ARCH}" = "amd64" ]
-    then
-	MDSPLUS_DIR=/workspace/releasebld/buildroot/usr/local/mdsplus
-	mkdir -p ${MDSPLUS_DIR};
-	mkdir -p /workspace/releasebld/64;
-	pushd /workspace/releasebld/64;
-	config ${test64}
-	$MAKE
-	$MAKE install
-	popd;
-    else
-	MDSPLUS_DIR=/workspace/releasebld/buildroot/usr/local/mdsplus
-	mkdir -p ${MDSPLUS_DIR};
-	mkdir -p /workspace/releasebld/32;
-	pushd /workspace/releasebld/32;
-	config 32 i686-linux bin lib --with-gsi=/usr:gcc64
-	$MAKE
-	$MAKE install
-	popd
+    MDSPLUS_DIR=/workspace/releasebld/buildroot/usr/local/mdsplus
+    mkdir -p ${MDSPLUS_DIR};
+    mkdir -p /workspace/releasebld/${bits};
+    pushd /workspace/releasebld/${bits};
+    config ${config_param}
+    if [ -z "$NOMAKE" ]; then
+      $MAKE
+      $MAKE install
     fi
+    popd;
+  if [ -z "$NOMAKE" ]; then
     BUILDROOT=/workspace/releasebld/buildroot \
 	     BRANCH=${BRANCH} \
 	     RELEASE_VERSION=${RELEASE_VERSION} \
 	     ARCH=${ARCH} \
 	     DISTNAME=${DISTNAME} \
 	     PLATFORM=${PLATFORM} \
-	     /source/deploy/platform/debian/debian_build_debs.py
+	     ${srcdir}/deploy/platform/debian/debian_build_debs.py
     baddeb=0
     for deb in $(find /release/${BRANCH}/DEBS/${ARCH} -name "*\.deb")
     do
@@ -95,10 +95,15 @@ buildrelease() {
 	then
 	   continue
 	fi
-	checkfile=/source/deploy/packaging/${PLATFORM}/$pkg.noarch
+        if [[ x${pkg} == x*_bin ]]
+        then
+          checkfile=${srcdir}/deploy/packaging/${PLATFORM}/$pkg.$ARCH
+        else
+          checkfile=${srcdir}/deploy/packaging/${PLATFORM}/$pkg.noarch
+        fi
 	if [ "$UPDATEPKG" = "yes" ]
 	then
-	    mkdir -p /source/deploy/packaging/${PLATFORM}
+	    mkdir -p ${srcdir}/deploy/packaging/${PLATFORM}
 	    makelist $deb > ${checkfile}
 	else
 	    set +e
@@ -113,6 +118,8 @@ buildrelease() {
 	fi
     done
     checkstatus abort "Failure: Problem with contents of one or more debs. (see above)" $baddeb
+  if [ -z "$abort" ] || [ "$abort" = "0" ]
+  then
     echo "Building repo";
     mkdir -p /release/repo/conf
     mkdir -p /release/repo/db
@@ -124,32 +131,42 @@ buildrelease() {
     else
         component=" ${BRANCH}"
     fi
-    arches=$(spacedelim ${ARCHES})
     cat - <<EOF > /release/repo/conf/distributions
 Origin: MDSplus Development Team
 Label: MDSplus
 Codename: MDSplus
-Architectures: ${arches}
+Architectures: ${ARCHES}
 Components: alpha stable${component}
 Description: MDSplus packages
 EOF
-    if [ -d /sign_keys/.gnupg ]
+    GPG_HOME=""
+    if [ -d /sign_keys/${OS}/.gnupg ]
     then
-        ls -l /sign_keys/.gnupg
-    	echo "SignWith: MDSplus" >> /release/repo/conf/distributions
+	GPG_HOME="/sign_keys/${OS}"
+    elif [ -d /sign_keys/.gnupg ]
+    then
+	GPG_HOME="/sign_keys"
     fi
-    export HOME=/sign_keys
+    if [ ! -z "$GPG_HOME" ]
+    then
+    	echo "SignWith: MDSplus" >> /release/repo/conf/distributions
+	rsync -a ${GPG_HOME}/.gnupg /tmp
+    fi
     pushd /release/repo
     reprepro clearvanished
     for deb in $(find /release/${BRANCH}/DEBS/${ARCH} -name "*${major}\.${minor}\.${release}_*")
     do
         if [ -z "$abort" ] || [ "$abort" = "0" ]
         then
-            :&& reprepro -V -C ${BRANCH} includedeb MDSplus $deb
+            :&& HOME=/tmp reprepro -V -C ${BRANCH} includedeb MDSplus $deb
             checkstatus abort "Failure: Problem installing $deb into repository." $?
+        else
+          break
         fi
     done
     popd
+  fi #abort
+  fi #nomake
 }
 publish() {
     ### DO NOT CLEAN /publish as it may contain valid older release packages
@@ -170,4 +187,3 @@ publish() {
 	popd
     fi
 }
-

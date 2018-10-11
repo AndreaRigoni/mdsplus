@@ -1,25 +1,18 @@
 package jScope;
 
-/* $Id$ */
-import jScope.WaveformEvent;
-import jScope.WaveInterface;
-import jScope.Waveform;
-import jScope.UpdateEvent;
-import jScope.UpdateEventListener;
-import jScope.TwuNameServices;
-import jScope.Signal;
-import jScope.MultiWaveform;
-import jScope.DataProvider;
-import jScope.FrameData;
-import jScope.MdsWaveInterface;
-import jScope.ColorMap;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.datatransfer.DataFlavor;
-import java.util.*;
-import java.io.*;
+import java.awt.geom.AffineTransform;
+import java.awt.image.RenderedImage;
+import java.io.IOException;
+import java.util.StringTokenizer;
+
 import javax.swing.SwingUtilities;
-import java.awt.image.*;
-import java.awt.geom.*;
 import javax.swing.TransferHandler;
 
 /**
@@ -31,11 +24,10 @@ public class jScopeMultiWave
     implements UpdateEventListener
 {
     String eventName;
-    public jScopeMultiWave(DataProvider dp, jScopeDefaultValues def_values,
-                           boolean cache_enabled)
+    public jScopeMultiWave(DataProvider dp, jScopeDefaultValues def_values)
     {
         super();
-        wi = new MdsWaveInterface(this, dp, def_values, cache_enabled);
+        wi = new MdsWaveInterface(this, dp, def_values);
         setTransferHandler(new ToTransferHandler());
     }
 
@@ -74,16 +66,12 @@ public class jScopeMultiWave
             {
        */
                 MdsWaveInterface mwi = (MdsWaveInterface) wi;
-                boolean cache_state = mwi.cache_enabled;
-                mwi.cache_enabled = false;
-                try {
+                 try {
                     mwi.refresh();
                 }catch(Exception exc)
                 {
                     System.out.println(exc);
                 }
-                mwi.cache_enabled = cache_state;
-
                 SwingUtilities.invokeLater(new Runnable()
                 {
                     public void run()
@@ -158,8 +146,6 @@ public class jScopeMultiWave
 
     public synchronized void jScopeWaveUpdate()
     {
-        String out_error;
-
         if (wi.isAddSignal())
         {
             //reset to previous configuration if signal/s are not added
@@ -294,7 +280,6 @@ public class jScopeMultiWave
 
     public void SetSignalState(String label, boolean state)
     {
-        Signal sig;
         wi.setSignalState(label, state);
         super.SetSignalState(label, state);
     }
@@ -309,7 +294,7 @@ public class jScopeMultiWave
             "";
         
         //If the legend is defined in the signal, override it
-        if (signals.size() > i && signals.elementAt(i).getLegend() != null)
+        if (signals.size() > i && signals.elementAt(i) != null && signals.elementAt(i).getLegend() != null)
             return signals.elementAt(i).getLegend();
         
         if (wi.shots != null)
@@ -321,9 +306,9 @@ public class jScopeMultiWave
             s = name + er;
         }
 
-        if (signals.size() > i)
+        if (signals.size() > i && signals.elementAt(i) != null)
         {
-            s += signals.elementAt(i).getName();
+//            s += signals.elementAt(i).getName();
             Signal sign = signals.elementAt(i);
             if (sign != null && sign.getType() == Signal.TYPE_2D)
             {
@@ -350,15 +335,7 @@ public class jScopeMultiWave
             }
         }
 
-        // TWU Signal URLs
-        // If the signal is a TWU URL, we would like it to be displayed as a URL.
-        // I hope that this does not clash with other jScope codes.  If so, tell me!
-        // J.G.Krom (Textor, Juelich, Germany) <J.Krom@fz-juelich.de>
-
-        if (TwuNameServices.catersFor(wi.dp))
-            s = TwuNameServices.legendString(wi, name,
-                                             wi.shots == null ? 0 : wi.shots[i]);
-
+     
         return s;
     }
 
@@ -405,7 +382,7 @@ public class jScopeMultiWave
         super.removeNotify();
     }
 
-    protected void DrawImage(Graphics g, Object img, Dimension dim, int type)
+    protected void DrawImage(Graphics g, Image img, Dimension dim, int type)
     {
         if ( type != FrameData.JAI_IMAGE )
         {

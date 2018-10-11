@@ -3,15 +3,13 @@ package jScope;
 import jScope.ConnectionEvent;
 import jScope.ConnectionListener;
 import java.io.*;
-import java.net.*;
 import java.awt.*;
+import java.awt.image.*;
 import java.util.*;
-import java.lang.OutOfMemoryError;
 import java.lang.InterruptedException;
+import javax.imageio.*;
 import javax.swing.*;
 import java.text.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class MdsDataProvider
     implements DataProvider
@@ -103,27 +101,39 @@ public class MdsDataProvider
             actSegments = endSegment - startSegment;
 //Get Frame Dimension and frames per segment
             int dims[] = GetIntArray("shape(GetSegment("+inY+", 0))");
-            if(dims.length != 3)
+            if(dims.length != 3 && dims.length != 1)  //The former refers to usual raster image, the latter to AWT images (jpg, gif...)
                 throw new IOException("Invalid number of segment dimensions: "+ dims.length);
-            dim = new Dimension(dims[0], dims[1]);
-            framesPerSegment = dims[2];
-//Get Frame element length in bytes
-            int len[] = GetIntArray("len(GetSegment("+inY+", 0))");
-            bytesPerPixel = len[0];
-            switch (len[0])
+            if(dims.length == 3)
             {
-                case 1:
-                    mode = BITMAP_IMAGE_8;
-                    break;
-                case 2:
-                    mode = BITMAP_IMAGE_16;
-                    break;
-                case 4:
-                    mode = BITMAP_IMAGE_32;
-                    break;
-                default:
-                    throw new IOException("Unexpected length for frame data: "+ len[0]);
-             }
+                dim = new Dimension(dims[0], dims[1]);
+                framesPerSegment = dims[2];
+//Get Frame element length in bytes
+                int len[] = GetIntArray("len(GetSegment("+inY+", 0))");
+                bytesPerPixel = len[0];
+                switch (len[0])
+                {
+                    case 1:
+                        mode = BITMAP_IMAGE_8;
+                        break;
+                    case 2:
+                        mode = BITMAP_IMAGE_16;
+                        break;
+                    case 4:
+                        mode = BITMAP_IMAGE_32;
+                        break;
+                    default:
+                        throw new IOException("Unexpected length for frame data: "+ len[0]);
+                }
+            }
+            else // The degment contains a 1D char buffer, i.e. the binary format of the image (jpg,gif, ...O)
+            {
+                framesPerSegment = 1;
+                mode = AWT_IMAGE;
+                bytesPerPixel = 1;
+                byte[] firstSegment = GetByteArray("GetSegment("+ inY+",0)");
+                BufferedImage img = ImageIO.read(new ByteArrayInputStream(firstSegment));
+                dim = new Dimension(img.getWidth(), img.getHeight());
+            }
 //Get Frame times
              if(framesPerSegment == 1) //We assume in this case that start time is the same of the frame time
              {
@@ -192,7 +202,6 @@ public class MdsDataProvider
         private int st_idx = -1, end_idx = -1;
         private int n_frames = 0;
         private float times[] = null;
-        private long  long_times[] = null; 
         private Dimension dim = null;
         private int header_size = 0;
 
@@ -202,7 +211,6 @@ public class MdsDataProvider
             int i;
             float t;
             float all_times[] = null;
-            int n_all_frames = 0;
 
             this.in_y = in_y;
             this.in_x = in_x;
@@ -391,7 +399,6 @@ public class MdsDataProvider
         boolean titleEvaluated = false;
         boolean xLabelEvaluated = false;
         boolean yLabelEvaluated = false;
-        boolean continuousUpdate = false;
         String wd_experiment;
         long wd_shot;
         AsynchDataSource asynchSource = null;
@@ -498,10 +505,6 @@ public class MdsDataProvider
         
         
         
-        public void setContinuousUpdate(boolean continuousUpdate)
-        {
-            this.continuousUpdate = continuousUpdate;
-        }
 
         public int getNumDimension() throws IOException
         {
@@ -688,7 +691,6 @@ public class MdsDataProvider
         {
              String xExpr, yExpr;
              XYData res = null;
-             double maxX = 0;
              
              if (!CheckOpen(this.wd_experiment, this.wd_shot))
                 return null;
@@ -741,8 +743,8 @@ public class MdsDataProvider
                 
                 if(isLong)
                 {
-                    args.addElement(new Descriptor(null, new long[]{(xmin == -Double.MAX_VALUE)?0:(long)xmin}));
-                    args.addElement(new Descriptor(null, new long[]{(xmax == Double.MAX_VALUE)?0:(long)xmax}));
+                    args.addElement(new Descriptor(null, new long[]{(xmin <= -Double.MAX_VALUE)?Long.MIN_VALUE:(long)xmin}));
+                    args.addElement(new Descriptor(null, new long[]{(xmax >= Double.MAX_VALUE)?Long.MAX_VALUE:(long)xmax}));
                 }
                 else
                 {
@@ -799,10 +801,6 @@ public class MdsDataProvider
                             longX[i] = dis.readLong();
                         isXLong = true;
                         res = new XYData(longX, y, dRes);
-                        if(longX.length > 0)
-                            maxX = longX[longX.length - 1];
-                        else 
-                            maxX = 0;
                    }
                     else if(type == 2) //double X
                     {
@@ -810,10 +808,6 @@ public class MdsDataProvider
                         for(int i = 0; i < nSamples; i++)
                             x[i] = dis.readDouble();
                         res = new XYData(x, y, dRes);
-                        if(x.length > 0)
-                            maxX = x[x.length - 1];
-                        else 
-                            maxX = 0;
                     }
                     else //float X
                     {
@@ -821,10 +815,6 @@ public class MdsDataProvider
                         for(int i = 0; i < nSamples; i++)
                             x[i] = dis.readFloat();
                         res = new XYData(x, y, dRes);
-                        if(x.length > 0)
-                            maxX = x[x.length - 1];
-                        else 
-                            maxX = 0;
                    }
                     //Get title, xLabel and yLabel
                    int titleLen = dis.readInt();
@@ -859,17 +849,10 @@ public class MdsDataProvider
                     nSamples = 0;
                 }
  */               //Got resampled signal, if it is segmented and jScope.refreshPeriod > 0, enqueue a new request
-                if(segmentMode == SEGMENTED_YES && continuousUpdate)
-                {
-                    long refreshPeriod = jScopeFacade.getRefreshPeriod();
-                    if(refreshPeriod <= 0) refreshPeriod = 1000; //default 1 s refresh
-                    updateWorker.updateInfo(/*xmin*/maxX, Double.MAX_VALUE, 2000,
-                        waveDataListenersV, this, isLong, refreshPeriod);
-                }
                 return res;
              }catch(Exception exc)
              {
-                 System.out.println("MdsMisc->GetXYSignal Failed: "+exc);
+                 //System.out.println("MdsMisc->GetXYSignal Failed: "+exc);  It means that MdsMisc->GetXYSignal() is likely not available on the server
              }
  //If execution arrives here probably MdsMisc->GetXYSignal() is not available on the server, so use the traditional approach
 //            float y[] = GetFloatArray("SetTimeContext(*,*,*); ("+yExpr+");");
@@ -1009,12 +992,6 @@ public class MdsDataProvider
         boolean enabled = true;
         Vector<UpdateDescriptor>requestsV = new Vector<>();
         void updateInfo(double updateLowerBound, double updateUpperBound, int updatePoints,
-                Vector<WaveDataListener> waveDataListenersV, SimpleWaveData simpleWaveData, boolean isXLong, long delay)
-        {
-            intUpdateInfo(updateLowerBound, updateUpperBound, updatePoints, waveDataListenersV, simpleWaveData, isXLong,
-                   Calendar.getInstance().getTimeInMillis()+delay);
-        }
-       void updateInfo(double updateLowerBound, double updateUpperBound, int updatePoints,
                 Vector<WaveDataListener> waveDataListenersV, SimpleWaveData simpleWaveData, boolean isXLong)
         {
  //           intUpdateInfo(updateLowerBound, updateUpperBound, updatePoints, waveDataListenersV, simpleWaveData, isXLong,
@@ -1025,7 +1002,7 @@ public class MdsDataProvider
         synchronized void intUpdateInfo(double updateLowerBound, double updateUpperBound, int updatePoints,
                 Vector<WaveDataListener> waveDataListenersV, SimpleWaveData simpleWaveData, boolean isXLong, long updateTime)
         {
-            if(updateTime > 0)  //If a delayed request for update
+            if(updateTime > 0)  //If a delayed request for update NOTE NOT USED!!!!Use MdsStreamingDataProvider instead
             {
                 for(int i = 0; i < requestsV.size(); i++)
                 {
@@ -1071,59 +1048,43 @@ public class MdsDataProvider
                     catch(InterruptedException exc) {}
                 }
                 if(!enabled) continue;
-                long currTime = Calendar.getInstance().getTimeInMillis();
-                long nextTime = -1;
-                int i = 0;
-                while(i < requestsV.size())
+                while(requestsV.size() > 0)
                 {
                     if(!enabled) break;
-                    UpdateDescriptor currUpdate = requestsV.elementAt(i);
-                    if(currUpdate.updateTime < currTime)
+                    //Take most recent request
+                    UpdateDescriptor currUpdate = requestsV.elementAt(requestsV.size() - 1);
+                    try 
                     {
-                         try 
-                        {
-                            
-                            requestsV.removeElementAt(i);
-                            XYData currData = currUpdate.simpleWaveData.getData(currUpdate.updateLowerBound, currUpdate.updateUpperBound, currUpdate.updatePoints, currUpdate.isXLong);
-                            
-                            if( currData == null || currData.nSamples == 0 )
-                                continue;
-                            for(int j = 0; j < currUpdate.waveDataListenersV.size(); j++)
-                            {
-                                if(currUpdate.isXLong)
-                                    currUpdate.waveDataListenersV.elementAt(j).dataRegionUpdated(currData.xLong, currData.y, currData.resolution);
-                                else
-                                    currUpdate.waveDataListenersV.elementAt(j).dataRegionUpdated(currData.x, currData.y, currData.resolution);
+                       requestsV.removeElementAt(requestsV.size() - 1);
+                       int k = 0;
+                       //remove older requests for the same waveform
+                       while(k < requestsV.size())
+                       {
+                           if(requestsV.elementAt(k).simpleWaveData == currUpdate.simpleWaveData)
+                               requestsV.removeElementAt(k);
+                           else
+                               k++;
+                       } 
+                           
+                       XYData currData = currUpdate.simpleWaveData.getData(currUpdate.updateLowerBound, currUpdate.updateUpperBound, currUpdate.updatePoints, currUpdate.isXLong);
 
-                            }
-                        }catch(Exception exc)
-                        {
-                            Date d = new Date();
-                            System.out.println(d+" Error in asynchUpdate: "+exc);
-                        }
-                    }
-                    else
-                    {
-                        if(nextTime == -1 || nextTime > currUpdate.updateTime) //It will alway be nextTime != -1
-                            nextTime = currUpdate.updateTime;
-                        i++;
-                    }
+                       if( currData == null || currData.nSamples == 0 )
+                           continue;
+                       for(int j = 0; j < currUpdate.waveDataListenersV.size(); j++)
+                       {
+                           if(currUpdate.isXLong)
+                               currUpdate.waveDataListenersV.elementAt(j).dataRegionUpdated(currData.xLong, currData.y, currData.resolution);
+                           else
+                               currUpdate.waveDataListenersV.elementAt(j).dataRegionUpdated(currData.x, currData.y, currData.resolution);
+
+                       }
+                   }catch(Exception exc)
+                   {
+                       Date d = new Date();
+                       System.out.println(d+" Error in asynchUpdate: "+exc);
+                   }
                 }
-                if(nextTime != -1) //If a pending request for which time did not expire, schedure a new notification
-                {
-                    currTime = Calendar.getInstance().getTimeInMillis();
-                    java.util.Timer timer = new java.util.Timer();
-                    timer.schedule(new TimerTask() {
-                        public void run()
-                        {
-                            synchronized(UpdateWorker.this)
-                            {
-                                UpdateWorker.this.notify();
-                            }
-                        }
-                    }, (nextTime < currTime + 50)?50:(nextTime - currTime + 1));
-                }
-            }
+             }
         }
     } //End Inner class UpdateWorker
 
@@ -1146,6 +1107,11 @@ public class MdsDataProvider
         return new MdsConnection();
     }
     
+    protected MdsConnection getConnection(String arg) 
+    {
+        return new MdsConnection(arg);
+    }
+    
     
     public MdsDataProvider(String provider)
     {
@@ -1153,7 +1119,8 @@ public class MdsDataProvider
         experiment = null;
         shot = 0;
         open = connected = false;
-        mds = new MdsConnection(this.provider);
+//        mds = new MdsConnection(this.provider);
+        mds = getConnection(this.provider);
         error = null;
         //updateWorker = new UpdateWorker();
         //updateWorker.start();
@@ -1164,7 +1131,8 @@ public class MdsDataProvider
         experiment = exp;
         shot = 0;
         open = connected = false;
-        mds = new MdsConnection();
+ //       mds = new MdsConnection();
+        mds = getConnection();
         error = null;
         //updateWorker = new UpdateWorker();
         //updateWorker.start();
@@ -1357,7 +1325,7 @@ public class MdsDataProvider
         return GetByteArray(in, null);
     }
 
-    public  synchronized  byte[] GetByteArray(String in, Vector args) throws IOException
+    public  synchronized  byte[] GetByteArray(String in, Vector<Descriptor> args) throws IOException
     {
         byte out_byte[] = null;
         ByteArrayOutputStream dosb = new ByteArrayOutputStream();
@@ -1422,9 +1390,12 @@ public class MdsDataProvider
           this.experiment = ((experiment != null) && (experiment.trim().length() > 0) ? experiment : null);
           this.shot = shot;
           this.open = false;
+          resetPrevious();
         }
     }
 
+    public void resetPrevious()  //Will be used by subclass MdsSreaminDataProvider to close previous  connections
+    {}
     public synchronized String GetString(String in) throws IOException
     {
         if (in == null)
@@ -1603,8 +1574,11 @@ public class MdsDataProvider
                 case Descriptor.DTYPE_LONG:
                     return (float) desc.int_data[0];
                 case Descriptor.DTYPE_BYTE:
+                     return (float) desc.byte_data[0];
                 case Descriptor.DTYPE_UBYTE:
-                    return (float) desc.byte_data[0];
+		     short currShort = 0;
+		     currShort |= ((short)desc.byte_data[0] & 0x00FF);
+		     return(float)currShort;
                 case Descriptor.DTYPE_CSTRING:
                     if ( (desc.status & 1) == 0)
                     {
@@ -1666,11 +1640,33 @@ public class MdsDataProvider
                 out = new RealArray(desc.double_data);
                 break;
             case Descriptor.DTYPE_LONG:
-            case Descriptor.DTYPE_USHORT:
             {
                 float[] outF = new float[desc.int_data.length];
                 for (int i = 0; i < desc.int_data.length; i++)
                     outF[i] = (float) desc.int_data[i];
+                out = new RealArray(outF);
+            }
+            case Descriptor.DTYPE_ULONG:
+            {
+                float[] outF = new float[desc.int_data.length];
+                for (int i = 0; i < desc.int_data.length; i++)
+ 		{
+		    long currLong = 0;
+		    currLong |= ((long)desc.int_data[i] & 0x00000000FFFFFFFF);
+                    outF[i] = (float) currLong;
+		}
+                out = new RealArray(outF);
+            }
+            break;
+            case Descriptor.DTYPE_USHORT:
+            {
+                float[] outF = new float[desc.int_data.length];
+                for (int i = 0; i < desc.int_data.length; i++)
+		{
+		    int currInt = 0;
+		    currInt |= ((int)desc.short_data[i] & 0x0000FFFF);
+                    outF[i] = (float) currInt;
+		}
                 out = new RealArray(outF);
             }
             break;
@@ -1683,7 +1679,6 @@ public class MdsDataProvider
             }
             break;
             case Descriptor.DTYPE_BYTE:
-            case Descriptor.DTYPE_UBYTE:
             {
                 float[] outF = new float[desc.byte_data.length];
                 for (int i = 0; i < desc.byte_data.length; i++)
@@ -1691,6 +1686,18 @@ public class MdsDataProvider
                 out = new RealArray(outF);
             }
             break;
+            case Descriptor.DTYPE_UBYTE:
+            {
+                float[] outF = new float[desc.byte_data.length];
+                for (int i = 0; i < desc.byte_data.length; i++)
+		{
+		    short currShort = 0;
+		    currShort |= ((short)desc.byte_data[i] & 0x00FF);
+                    outF[i] = (float) currShort;
+		}
+                out = new RealArray(outF);
+            }
+	    break;
             case Descriptor.DTYPE_ULONGLONG:
             case Descriptor.DTYPE_LONGLONG:
             {
@@ -1805,7 +1812,6 @@ public class MdsDataProvider
        {
            ssh_tunneling.Dispose();
        }
-
        if (connected)
         {
             connected = false;
@@ -1823,7 +1829,7 @@ public class MdsDataProvider
         {
             updateWorker.stopUpdateWorker();
         }
-    }
+   }
 
     protected synchronized void CheckConnection() throws IOException
     {
@@ -1909,8 +1915,13 @@ public class MdsDataProvider
         if (open && def_node_changed)
         {
             if (default_node != null) {
-                Descriptor descr = mds.MdsValue("TreeSetDefault(\"\\\\" + default_node + "\")");
-                if ((descr.int_data[0] & 1 ) == 0)
+		Descriptor descr;
+		if(default_node.trim().charAt(0) == '\\')
+		    descr = mds.MdsValue("TreeSetDefault(\"\\" + default_node + "\")");
+		else
+		    descr = mds.MdsValue("TreeSetDefault(\"\\" + default_node + "\")");
+ 
+               if ((descr.int_data[0] & 1 ) == 0)
                     mds.MdsValue("TreeSetDefault(\"\\\\" + experiment + "::TOP\")");
             } else
                 mds.MdsValue("TreeSetDefault(\"\\\\" + experiment + "::TOP\")");
